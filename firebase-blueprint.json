@@ -1,0 +1,28 @@
+{
+  "collections": {
+    "users": {
+      "description": "User profiles, fitness data, workout logs, and water tracker progress.",
+      "documents": {
+        "uid": {
+          "profile": {
+            "name": "string",
+            "age": "string",
+            "weight": "string",
+            "height": "string",
+            "gender": "string",
+            "neck": "string",
+            "waist": "string",
+            "hip": "string"
+          },
+          "waterData": {
+            "goal": "number",
+            "log": "object",
+            "reminderEnabled": "boolean",
+            "reminderInterval": "number"
+          },
+          "logs": "object"
+        }
+      }
+    }
+  }
+}

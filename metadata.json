@@ -1,0 +1,11 @@
+{
+  "name": "Remix: Gym Buddy: AI Fitness \u0026 Beslenme Asistanı",
+  "description": "A comprehensive gym application offering exercise tips, AI-powered calorie calculator, nutrition recommendations, and personalized workout plans.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "prompt": "",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
