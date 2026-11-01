@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 // Version: VERSION_NAME / VERSION_CODE can be overridden from CI (gradle -P or env).
-def appVersionName = (project.findProperty('VERSION_NAME') ?: System.getenv('VERSION_NAME') ?: '0.1.0-beta.1').toString()
+def appVersionName = (project.findProperty('VERSION_NAME') ?: System.getenv('VERSION_NAME') ?: '0.1.0-beta.2').toString()
 def appVersionCode = (project.findProperty('VERSION_CODE') ?: System.getenv('VERSION_CODE') ?: '1').toString().toInteger()
 
 // Release signing comes from environment variables (GitHub Actions secrets).
