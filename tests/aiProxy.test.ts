@@ -56,7 +56,7 @@ describe('AI proxy handler', () => {
         const body = await res.json();
         expect(body.result).toMatchObject({ mealName: 'Pilav', calories: 350, fat: 4 });
         const [url, init] = fetchMock.mock.calls[0];
-        expect(String(url)).toContain('/models/gemini-2.5-flash:generateContent');
+        expect(String(url)).toContain('/models/gemini-3.6-flash:generateContent');
         expect((init as RequestInit).headers).toMatchObject({ 'x-goog-api-key': 'server-secret-key' });
         // The key is never echoed back.
         expect(JSON.stringify(body)).not.toContain('server-secret-key');
@@ -110,9 +110,10 @@ describe('AI proxy handler', () => {
     });
 
     it('maps upstream quota errors to 429 and other failures to 502', async () => {
-        fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 }));
+        fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 })).mockResolvedValueOnce(new Response('{}', { status: 429 }));
         expect((await handle(req(mealText), env, deps)).status).toBe(429);
-        fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
+        // 5xx on every model → 502
+        fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 })).mockResolvedValueOnce(new Response('{}', { status: 500 }));
         expect((await handle(req(mealText), env, deps)).status).toBe(502);
     });
 
@@ -169,5 +170,41 @@ describe('RateLimiter', () => {
         rl.take('a', 0);
         rl.take('a', 1);
         expect(rl.take('a', 2)).toMatchObject({ ok: false });
+    });
+});
+
+describe('model fallback', () => {
+    it('falls through retired models (404) and uses the next one', async () => {
+        const calls: string[] = [];
+        const f = vi.fn(async (url: string, _init?: RequestInit) => {
+            calls.push(url);
+            return calls.length === 1
+                ? new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 })
+                : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"calories":100}' }] } }] }), { status: 200 });
+        });
+        const res = await handle(
+            new Request('https://p.test/functions/v1/ai-proxy', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer good' },
+                body: JSON.stringify({ task: 'mealText', input: { description: 'elma' } }),
+            }),
+            { GEMINI_API_KEY: 'k', SUPABASE_URL: 'https://d', SUPABASE_ANON_KEY: 'a', GEMINI_TEXT_MODEL: 'custom-model' },
+            { fetch: f as unknown as typeof fetch, verifyToken: async () => 'u', limiter: new RateLimiter(9, 9), now: () => 0, log: () => undefined },
+        );
+        expect(res.status).toBe(200);
+        expect(calls[0]).toContain('/models/custom-model:');
+        expect(calls[1]).toContain('/models/gemini-3.6-flash:');
+        expect(JSON.parse((f.mock.calls[1] as unknown as [string, RequestInit])[1].body as string).generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+    });
+
+    it('does not retry on non-404 errors', async () => {
+        const f = vi.fn(async () => new Response('{}', { status: 400 }));
+        const res = await handle(
+            new Request('https://p.test/x', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ task: 'mealText', input: { description: 'elma' } }) }),
+            { GEMINI_API_KEY: 'k', SUPABASE_URL: 'https://d', SUPABASE_ANON_KEY: 'a' },
+            { fetch: f as unknown as typeof fetch, verifyToken: async () => 'u', limiter: new RateLimiter(9, 9), now: () => 0, log: () => undefined },
+        );
+        expect(res.status).toBe(502);
+        expect(f).toHaveBeenCalledTimes(1);
     });
 });
