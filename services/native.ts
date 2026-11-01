@@ -68,8 +68,9 @@ export async function resizeToJpeg(source: Blob | string): Promise<PickedImage> 
 }
 
 /**
- * On Android: native sheet "Camera / Gallery" via @capacitor/camera (the
- * camera app and the system photo picker need no extra permissions).
+ * On Android: native sheet "Camera / Gallery" via @capacitor/camera. Taking a
+ * photo asks for the CAMERA permission the first time; the gallery uses the
+ * Android photo picker, which needs no storage permission.
  * On the web: callers use an <input type="file"> and pass the File to resizeToJpeg.
  */
 export async function pickImageNative(): Promise<PickedImage> {
@@ -93,7 +94,7 @@ export async function pickImageNative(): Promise<PickedImage> {
         const msg = e instanceof Error ? e.message : String(e);
         if (/cancel/i.test(msg)) throw new ImagePickCancelled(msg);
         if (/denied|permission/i.test(msg)) {
-            throw new Error('Kamera veya galeri izni verilmedi. Ayarlar > Uygulamalar > Gym Buddy > İzinler bölümünden izin verebilirsiniz.');
+            throw new Error('Kamera izni verilmedi. Fotoğraf çekmek için Ayarlar > Uygulamalar > Gym Buddy > İzinler bölümünden kameraya izin verin ya da galeriden seçin.');
         }
         throw e instanceof Error ? e : new Error(msg);
     }
@@ -133,6 +134,27 @@ export async function requestReminderPermission(): Promise<ReminderPermission> {
     if (!('Notification' in window)) return 'unsupported';
     const p = await Notification.requestPermission();
     return p === 'granted' ? 'granted' : 'denied';
+}
+
+const NOTIF_ASKED_KEY = 'gym_buddy_notification_permission_asked';
+
+/**
+ * Asks for the notification permission once, on the first launch of the
+ * Android app (Android 13+ shows the system dialog). Denial is respected; the
+ * user can still enable reminders later from the water tracker / Settings.
+ */
+export async function askNotificationPermissionOnce(): Promise<void> {
+    if (!isNative) return;
+    try {
+        if (localStorage.getItem(NOTIF_ASKED_KEY)) return;
+        localStorage.setItem(NOTIF_ASKED_KEY, '1');
+    } catch {
+        return;
+    }
+    const current = await LocalNotifications.checkPermissions();
+    if (current.display === 'prompt' || current.display === 'prompt-with-rationale') {
+        await LocalNotifications.requestPermissions();
+    }
 }
 
 export async function cancelWaterReminders(): Promise<void> {

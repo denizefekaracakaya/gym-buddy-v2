@@ -28,7 +28,7 @@ import { parseWorkoutFromText } from './services/geminiService';
 import { auth } from './services/supabase';
 import { emptyUserData } from './services/userData';
 import { loadUserData, saveUserData, flushPending } from './services/userSync';
-import { isNative, scheduleWaterReminders, cancelWaterReminders, hapticTap } from './services/native';
+import { isNative, scheduleWaterReminders, cancelWaterReminders, hapticTap, askNotificationPermissionOnce } from './services/native';
 import { localDateKey } from './lib/date';
 import { App as CapApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
@@ -206,6 +206,12 @@ const App: React.FC = () => {
             removers.forEach((r) => r());
         };
     }, []);
+
+    // First launch on Android: ask for notification permission once, after the
+    // app has finished loading (not on top of the splash screen).
+    useEffect(() => {
+        if (!authLoading) askNotificationPermissionOnce().catch(() => undefined);
+    }, [authLoading]);
 
     // ---------- water reminders ----------
     useEffect(() => {

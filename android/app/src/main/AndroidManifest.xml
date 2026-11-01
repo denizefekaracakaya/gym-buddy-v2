@@ -45,6 +45,9 @@
 
     <!-- Permissions (plugins add their own; see docs/MOBILE_ARCHITECTURE.md for the full merged list) -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Meal / water photos: asked at runtime the first time the user takes a photo. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Water reminders do not need to fire at the exact minute; inexact alarms need no special permission. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
 </manifest>

@@ -147,13 +147,16 @@ Design (`supabase/functions/ai-proxy/`):
 |---|---|---|---|
 | INTERNET | app | Supabase, AI function | install-time |
 | ACCESS_NETWORK_STATE | @capacitor/network | offline banner | install-time |
-| POST_NOTIFICATIONS | local-notifications | water reminders (Android 13+) | runtime, only when the user turns reminders on; denial shows how to enable it in Settings |
+| CAMERA | app | meal / water photos | runtime, the first time the user chooses "Fotoğraf Çek"; denial shows how to allow it and the gallery still works |
+| POST_NOTIFICATIONS | local-notifications | water reminders (Android 13+) | runtime, once on first launch (owner request) and again when the user turns reminders on; denial shows how to enable it in Settings |
 | RECEIVE_BOOT_COMPLETED, WAKE_LOCK | local-notifications | keep scheduled reminders after reboot | install-time |
 | VIBRATE | @capacitor/haptics | light haptic feedback | install-time |
 | ~~SCHEDULE_EXACT_ALARM~~ | removed via `tools:node="remove"` | reminders don't need minute precision | — |
 
-No camera, storage or location permissions: the camera is used through the system
-camera app and images through the Android photo picker.
+No storage or location permissions: gallery images come from the Android photo
+picker, which needs none. (Until beta.1 the camera was also used without the
+CAMERA permission via the system camera app; the owner asked for an explicit
+permission prompt, so beta.2 declares and requests it.)
 
 ### Browser APIs replaced
 
