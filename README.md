@@ -1,92 +1,90 @@
 # Gym Buddy — AI Fitness & Nutrition Assistant
 
-A web-based fitness and nutrition assistant powered by Google Gemini AI. Plan workouts,
-log exercises, analyze meals, and track water intake — with your data persisted per-user
-via Firebase.
+A fitness and nutrition assistant for **Android** and the **web**. Plan workouts,
+log exercises, calculate calories and body fat, analyse meals, chat with an AI coach
+and track water intake — with your data synced per user via Firebase.
 
-Built with **React 19**, **Vite**, and **TypeScript**.
+Built with **React 19**, **Vite**, **TypeScript**, **Tailwind CSS** and
+**Capacitor 8** (Android).
 
 ## Features
 
-- **AI Workout Planner** — personalized workout plans tailored to your profile
-- **Workout Log** — log and review exercises over time
-- **Calorie Calculator** — AI-assisted calorie recommendations
-- **Body Fat Calculator** — body-composition estimates
-- **Meal Analyzer** — AI nutrition insights from a meal description or photo
-- **AI Buddy Chat** — nutrition tips and coaching via Gemini
-- **Water Tracker** — daily hydration goals with reminders
-- **User Profiles** — Firebase Auth + Firestore sync, so data follows the user
+- **AI Workout Planner** — personalised plans by muscle group, equipment, frequency and duration
+- **Workout Log** — exercises per muscle group with working / warm-up / bodyweight / drop sets, warm-up generator
+- **Calorie Calculator** — BMR/TDEE (Mifflin-St Jeor) and macros computed on the device, plus AI advice
+- **Body Fat Calculator** — U.S. Navy method computed on the device, ACE category, plus AI advice
+- **Meal Analyzer** — nutrition estimate from a photo (camera/gallery) or a description
+- **AI Buddy Chat** — fitness and nutrition coaching with nutrition/exercise cards; save suggested programs to the log
+- **Water Tracker** — daily goal, streaks, weekly and 30-day charts, AI photo estimate, reminders (native notifications on Android)
+- **Profile & sync** — Firebase Auth + Cloud Firestore, offline cache
 
-## Tech Stack
+## Install the Android beta
 
-| Layer    | Tech                                                        |
-|----------|-------------------------------------------------------------|
-| Frontend | React 19, TypeScript, Vite                                  |
-| AI       | Google Gemini AI (`@google/genai`)                          |
-| Backend  | Firebase Authentication + Cloud Firestore                   |
-| Charts   | Recharts                                                    |
+Download the APK from the [Releases page](https://github.com/denizefekaracakaya/gym-buddy-v2/releases)
+(pre-releases), open it on your phone and allow "Install unknown apps" for your
+browser/file manager when Android asks. Requires Android 7.0 (API 24) or newer.
+See the release notes for the signing type and known issues.
 
-## Getting Started
+## Architecture
 
-### Prerequisites
+```
+React app (Vite) ──► Capacitor 8 Android shell
+   │                     camera · notifications · haptics · back button · status bar
+   ├─► Firebase Auth + Firestore  (users/{uid}: profile, logs, waterData)
+   └─► AI proxy (Cloudflare Worker, server/ai-proxy) ──► Google Gemini
+         verifies Firebase ID token · validates input · rate-limits · holds the API key
+```
 
-- Node.js 18+
-- A Google Gemini API key from [Google AI Studio](https://aistudio.google.com/)
-- A Firebase project with **Authentication** and **Firestore** enabled
+The Gemini API key is **never** shipped in the app. Details:
+[docs/MOBILE_ARCHITECTURE.md](docs/MOBILE_ARCHITECTURE.md).
 
-### Setup
+## Development
 
-1. Install dependencies:
+Requirements: Node.js ≥ 22.12, JDK 21, Android SDK 36 (for Android builds).
 
-   ```bash
-   npm install
-   ```
+```bash
+npm ci
+cp .env.example .env.local   # optional: VITE_AI_PROXY_URL=https://…workers.dev
+npm run dev                  # http://localhost:3000
+```
 
-2. Create a `.env` file in the project root with your Gemini key:
+| Command | Description |
+|---|---|
+| `npm run dev` | Vite dev server |
+| `npm run build` | Production web build (`dist/`) |
+| `npm run typecheck` | TypeScript check |
+| `npm test` | Unit tests (Vitest) |
+| `npm run test:rules` | Firestore security-rules tests (emulator) |
+| `npm run verify:bundle` | Scan `dist/` for secrets / dev URLs |
+| `npm run android:sync` | Build + copy web assets into `android/` |
+| `npm run android:open` | Open the Android project in Android Studio |
+| `npm run proxy:deploy` | Deploy the AI proxy Worker |
 
-   ```bash
-   GEMINI_API_KEY=your_gemini_api_key
-   ```
+Full setup (Firebase, AI proxy, signing, CI, releases):
+[docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md).
 
-   The key is injected at build time via `vite.config.ts` and read by
-   `services/geminiService.ts`.
-
-3. Put your Firebase project configuration into `services/firebase.ts`.
-
-4. Run the dev server:
-
-   ```bash
-   npm run dev
-   ```
-
-   The app is served at <http://localhost:3000>.
-
-## Scripts
-
-| Command            | Description                  |
-|--------------------|------------------------------|
-| `npm run dev`      | Start the Vite dev server    |
-| `npm run build`    | Produce a production build   |
-| `npm run preview`  | Preview the production build |
-
-## Project Structure
+## Project structure
 
 ```
 gym-buddy-v2/
-├── App.tsx                 # App shell + navigation
-├── components/             # Feature components
-│   ├── WorkoutPlanner.tsx
-│   ├── WorkoutLog.tsx
-│   ├── CalorieCalculator.tsx
-│   ├── BodyFatCalculator.tsx
-│   ├── MealAnalyzer.tsx
-│   ├── NutritionTips.tsx   # AI buddy chat
-│   ├── WaterTracker.tsx
-│   ├── Profile.tsx
-│   └── shared/
+├── App.tsx                  # App shell, auth/data flow, mobile navigation, lifecycle
+├── components/              # Feature screens (+ shared/)
+├── lib/                     # Pure logic: fitness formulas, dates, AI parsing, markdown sanitiser
 ├── services/
-│   ├── firebase.ts         # Auth + Firestore wiring
-│   └── geminiService.ts    # Gemini calls + JSON parsing
-├── constants.tsx
-└── types.ts
+│   ├── firebase.ts          # Auth + Firestore (named database, offline cache)
+│   ├── userData.ts / userSync.ts  # Load/save users/{uid}, local backup, migration
+│   ├── geminiService.ts     # Client for the AI proxy
+│   └── native.ts            # Capacitor wrappers (camera, notifications, haptics, links)
+├── server/ai-proxy/         # Cloudflare Worker (Gemini proxy)
+├── android/                 # Capacitor Android project
+├── tests/                   # Vitest unit tests + Firestore rules tests
+├── firestore.rules          # Security rules
+└── docs/                    # Audit, architecture, setup, release report
 ```
+
+## Documentation
+
+- [Mobile migration audit](docs/MOBILE_MIGRATION_AUDIT.md)
+- [Architecture decision](docs/MOBILE_ARCHITECTURE.md)
+- [Setup, build, CI and release](docs/MOBILE_SETUP.md)
+- [Beta release report](docs/BETA_RELEASE_REPORT.md)
