@@ -29,9 +29,24 @@ export interface Deps {
 }
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const DEFAULT_TEXT_MODEL = 'gemini-2.5-flash';
-const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image';
-const GEMINI_TIMEOUT_MS = 60_000;
+// Tried in order; on 404 (retired / not available for the key), 429, 5xx or a
+// timeout the next model is used. GEMINI_TEXT_MODEL / GEMINI_IMAGE_MODEL
+// (function secrets) are tried first when set.
+// Measured 2026-11-01 with the project key: gemini-2.5-flash → 404,
+// gemini-3.8-flash / gemini-flash-latest → >40 s timeouts, gemini-3.6-flash
+// (thinking "low") ≈ 1.7 s, gemini-3.5-flash-lite ≈ 0.8 s.
+export interface ModelChoice {
+    name: string;
+    thinkingLevel?: 'low' | 'high';
+}
+export const TEXT_MODELS: ModelChoice[] = [{ name: 'gemini-3.6-flash', thinkingLevel: 'low' }, { name: 'gemini-3.5-flash-lite' }];
+export const IMAGE_MODELS: ModelChoice[] = [
+    { name: 'gemini-nano-banana-2.1' },
+    { name: 'gemini-3.1-flash-image' },
+    { name: 'gemini-3.1-flash-lite-image' },
+];
+const RETRYABLE = new Set([404, 429, 500, 502, 503, 504]);
+const GEMINI_TIMEOUT_MS = 40_000;
 
 const DEFAULT_ORIGINS = ['https://localhost', 'capacitor://localhost', 'http://localhost', 'http://localhost:3000'];
 
@@ -59,38 +74,64 @@ const err = (status: number, code: string, message: string, cors: Record<string,
     json(status, { error: { code, message } }, cors);
 
 async function callGemini(deps: Deps, env: Env, g: GeminiRequest) {
-    const model = g.model === 'image' ? env.GEMINI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL : env.GEMINI_TEXT_MODEL || DEFAULT_TEXT_MODEL;
-    const body: Record<string, unknown> = { contents: g.contents };
-    if (g.systemInstruction) body.systemInstruction = { parts: [{ text: g.systemInstruction }] };
-    if (g.generationConfig) body.generationConfig = g.generationConfig;
-    const res = await deps.fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
-        },
-    );
-    if (!res.ok) {
-        // Only Google's machine-readable status/reason is kept (e.g. API_KEY_INVALID,
-        // NOT_FOUND) — never the request content.
-        let reason = '';
+    const configured = g.model === 'image' ? env.GEMINI_IMAGE_MODEL : env.GEMINI_TEXT_MODEL;
+    const defaults = g.model === 'image' ? IMAGE_MODELS : TEXT_MODELS;
+    const candidates: ModelChoice[] = [
+        ...(configured ? [{ name: configured }] : []),
+        ...defaults.filter((m) => m.name !== configured),
+    ];
+    let last: { upstreamStatus: number; reason: string; model: string } | null = null;
+    for (const choice of candidates) {
+        const model = choice.name;
+        const generationConfig: Record<string, unknown> = { ...(g.generationConfig ?? {}) };
+        if (choice.thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel: choice.thinkingLevel };
+        const body: Record<string, unknown> = { contents: g.contents };
+        if (g.systemInstruction) body.systemInstruction = { parts: [{ text: g.systemInstruction }] };
+        if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
+        let res: Response;
         try {
-            const e = (await res.json()) as { error?: { status?: string; details?: { reason?: string }[] } };
-            reason = [e.error?.status, e.error?.details?.find((d) => d.reason)?.reason].filter(Boolean).join('/');
-        } catch {
-            // ignore
+            res = await deps.fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+                    body: JSON.stringify(body),
+                    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+                },
+            );
+        } catch (e) {
+            const name = e instanceof Error ? e.name : '';
+            if (name !== 'TimeoutError' && name !== 'AbortError') throw e;
+            last = { upstreamStatus: 504, reason: 'TIMEOUT', model };
+            deps.log({ status: 'model_fallback', model, reason: 'TIMEOUT' });
+            continue;
         }
-        return { upstreamStatus: res.status as number, reason, model };
+        if (!res.ok) {
+            // Only Google's machine-readable status/reason is kept (e.g. API_KEY_INVALID,
+            // NOT_FOUND) — never the request content.
+            let reason = '';
+            try {
+                const e = (await res.json()) as { error?: { status?: string; details?: { reason?: string }[] } };
+                reason = [e.error?.status, e.error?.details?.find((d) => d.reason)?.reason].filter(Boolean).join('/');
+            } catch {
+                // ignore
+            }
+            last = { upstreamStatus: res.status as number, reason, model };
+            if (RETRYABLE.has(res.status)) {
+                deps.log({ status: 'model_fallback', model, upstream: res.status, reason });
+                continue;
+            }
+            return last;
+        }
+        const data = (await res.json()) as {
+            candidates?: { content?: { parts?: { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string } }[] } }[];
+        };
+        const parts = (data.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought);
+        const text = parts.map((p) => p.text ?? '').join('');
+        const img = parts.find((p) => p.inlineData?.data)?.inlineData;
+        return { text, model, inlineImage: img ? { mimeType: img.mimeType, data: img.data } : undefined };
     }
-    const data = (await res.json()) as {
-        candidates?: { content?: { parts?: { text?: string; inlineData?: { mimeType: string; data: string } }[] } }[];
-    };
-    const parts = data.candidates?.[0]?.content?.parts ?? [];
-    const text = parts.map((p) => p.text ?? '').join('');
-    const img = parts.find((p) => p.inlineData?.data)?.inlineData;
-    return { text, inlineImage: img ? { mimeType: img.mimeType, data: img.data } : undefined };
+    return last ?? { upstreamStatus: 404, reason: 'NO_MODEL', model: '' };
 }
 
 export async function handle(req: Request, env: Env, deps: Deps): Promise<Response> {
@@ -166,13 +207,16 @@ export async function handle(req: Request, env: Env, deps: Deps): Promise<Respon
                 model: reply.model,
                 ms: deps.now() - started,
             });
+            if (reply.upstreamStatus === 504) {
+                return err(504, 'ai_timeout', 'Yapay zeka yanıt vermedi. Lütfen tekrar deneyin.', cors);
+            }
             if (reply.upstreamStatus === 429) {
                 return err(429, 'ai_quota', 'Yapay zeka servisi şu an yoğun. Lütfen daha sonra tekrar deneyin.', cors);
             }
             return err(502, 'ai_error', 'Yapay zeka servisine ulaşılamadı.', cors);
         }
         const result = task.shape(reply);
-        deps.log({ ...logBase, status: 'ok', ms: deps.now() - started });
+        deps.log({ ...logBase, status: 'ok', model: reply.model, ms: deps.now() - started });
         return json(200, { result }, cors);
     } catch (e) {
         const name = e instanceof Error ? e.name : 'unknown';

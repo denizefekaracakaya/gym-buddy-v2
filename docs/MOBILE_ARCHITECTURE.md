@@ -116,8 +116,13 @@ Design (`supabase/functions/ai-proxy/`):
 * **Errors:** mapped to stable codes (`auth_required`, `rate_limited`, `ai_quota`,
   `ai_timeout`, `ai_error`…) with Turkish messages; upstream bodies never forwarded.
 * **Logging:** task name, status, latency only — no prompts, images, e-mail or uid.
-* **Models:** `gemini-2.5-flash` (text/vision) and `gemini-2.5-flash-image`
-  (illustrations), configurable via function secrets (`GEMINI_TEXT_MODEL`, `GEMINI_IMAGE_MODEL`) without an app update.
+* **Models (with fallback):** text/vision `gemini-3.6-flash` (thinking level
+  "low") → `gemini-3.5-flash-lite`; illustrations `gemini-nano-banana-2.1` →
+  `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image`. On 404/429/5xx/timeout
+  the next model is tried. Chosen from measurements on 2026-11-01: the original
+  `gemini-2.5-flash` returned 404 for the project key and `gemini-3.8-flash`
+  timed out (>40 s). `GEMINI_TEXT_MODEL` / `GEMINI_IMAGE_MODEL` secrets override
+  the first choice without an app update.
 * Calories and body fat are now computed **in code** (Mifflin-St Jeor, US Navy) on
   the device; the AI only writes advice around the computed numbers.
 
