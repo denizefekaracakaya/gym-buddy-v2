@@ -135,7 +135,10 @@ jobs:
           grep -q "versionName='${VERSION_NAME}'" "$RUNNER_TEMP/badging.txt"
           if grep -q "application-debuggable" "$RUNNER_TEMP/badging.txt"; then echo "APK is debuggable" && exit 1; fi
           # The packaged web bundle must pass the same secret scan as dist/.
-          mkdir -p "$RUNNER_TEMP/apk" && unzip -q "$APK" 'assets/public/*' -d "$RUNNER_TEMP/apk"
+          # Extract the whole APK: unzip wildcards do not cross '/', so 'assets/public/*'
+          # would only scan the top level and miss the JS bundles in assets/public/assets/.
+          mkdir -p "$RUNNER_TEMP/apk" && unzip -q "$APK" -d "$RUNNER_TEMP/apk"
+          test -n "$(ls "$RUNNER_TEMP"/apk/assets/public/assets/*.js)"
           node scripts/verify-bundle.mjs "$RUNNER_TEMP/apk/assets/public"
 
       - name: Collect artifacts + checksums
