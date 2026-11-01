@@ -1,14 +1,16 @@
-// Client side of the AI features. The Gemini API key is NOT in the app any
-// more: every request goes to the Gym Buddy AI proxy (server/ai-proxy), which
-// holds the key, verifies the user's Firebase ID token, validates the input
-// and builds the prompt. Configure the proxy URL with VITE_AI_PROXY_URL.
+// Client side of the AI features. The Gemini API key is NOT in the app: every
+// request goes to the `ai-proxy` Supabase Edge Function
+// (supabase/functions/ai-proxy), which holds the key, verifies the user's
+// session, validates the input and builds the prompt.
 
-import { auth } from './firebase';
+import { auth } from './supabase';
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '../supabase.config';
 import type { ChatMessage, Exercise, NutritionInfo, ParsedWorkout, WaterEstimation } from '../types';
 import type { ActivityLevel, Goal, Sex } from '../lib/fitness';
 
-export const AI_PROXY_URL = (import.meta.env.VITE_AI_PROXY_URL || '').replace(/\/+$/, '');
-export const aiConfigured = AI_PROXY_URL.length > 0;
+export const AI_PROXY_URL = (import.meta.env.VITE_AI_PROXY_URL || `${SUPABASE_URL}/functions/v1/ai-proxy`).replace(/\/+$/, '');
+/** Builds can opt out with VITE_AI_DISABLED=true. */
+export const aiConfigured = import.meta.env.VITE_AI_DISABLED !== 'true';
 
 export type AiErrorCode =
     | 'not_configured'
@@ -41,22 +43,17 @@ const REQUEST_TIMEOUT_MS = 90_000;
 
 async function callAi<T>(task: string, input: Record<string, unknown>): Promise<T> {
     if (!aiConfigured) throw new AiError('not_configured', MESSAGES.not_configured);
-    const user = auth.currentUser;
-    if (!user) throw new AiError('auth_required', MESSAGES.auth_required);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AiError('offline', MESSAGES.offline);
-
-    let token: string;
-    try {
-        token = await user.getIdToken();
-    } catch {
-        throw new AiError('auth_required', 'Oturumunuz doğrulanamadı. Lütfen tekrar giriş yapın.');
-    }
+    // getSession() refreshes an expired access token when needed.
+    const { data } = await auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new AiError('auth_required', MESSAGES.auth_required);
 
     let res: Response;
     try {
-        res = await fetch(`${AI_PROXY_URL}/v1/ai`, {
+        res = await fetch(AI_PROXY_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: SUPABASE_PUBLISHABLE_KEY },
             body: JSON.stringify({ task, input }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handle, MAX_BODY_BYTES, type Deps, type Env } from '../server/ai-proxy/src/handler';
-import { AuthError } from '../server/ai-proxy/src/auth';
-import { RateLimiter } from '../server/ai-proxy/src/rateLimit';
-import { MAX_CHAT_MESSAGES } from '../server/ai-proxy/src/tasks';
+import { handle, MAX_BODY_BYTES, type Deps, type Env } from '../supabase/functions/ai-proxy/handler.ts';
+import { AuthError } from '../supabase/functions/ai-proxy/auth.ts';
+import { RateLimiter } from '../supabase/functions/ai-proxy/rateLimit.ts';
+import { MAX_CHAT_MESSAGES } from '../supabase/functions/ai-proxy/tasks.ts';
 
-const env: Env = { GEMINI_API_KEY: 'server-secret-key', FIREBASE_PROJECT_ID: 'demo-project' };
+const env: Env = { GEMINI_API_KEY: 'server-secret-key', SUPABASE_URL: 'https://demo.supabase.co', SUPABASE_ANON_KEY: 'anon' };
 
 const geminiReply = (text: string, status = 200) =>
     new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status });
@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 const req = (body: unknown, headers: Record<string, string> = { Authorization: 'Bearer good' }, method = 'POST') =>
-    new Request('https://proxy.test/v1/ai', {
+    new Request('https://proxy.test/functions/v1/ai-proxy', {
         method,
         headers: { 'Content-Type': 'application/json', Origin: 'https://localhost', ...headers },
         body: method === 'POST' ? JSON.stringify(body) : undefined,
@@ -38,7 +38,7 @@ const req = (body: unknown, headers: Record<string, string> = { Authorization: '
 const mealText = { task: 'mealText', input: { description: '1 tabak pilav', weight: '200' } };
 
 describe('AI proxy handler', () => {
-    it('requires a Firebase ID token', async () => {
+    it('requires a user access token', async () => {
         const res = await handle(req(mealText, {}), env, deps);
         expect(res.status).toBe(401);
         expect(fetchMock).not.toHaveBeenCalled();
@@ -150,7 +150,7 @@ describe('AI proxy handler', () => {
 
     it('answers CORS preflight and health without auth, and 503 when unconfigured', async () => {
         expect((await handle(req(null, {}, 'OPTIONS'), env, deps)).status).toBe(204);
-        expect((await handle(new Request('https://proxy.test/health'), env, deps)).status).toBe(200);
+        expect((await handle(new Request('https://proxy.test/functions/v1/ai-proxy/health'), env, deps)).status).toBe(200);
         expect((await handle(req(mealText), { ...env, GEMINI_API_KEY: '' }, deps)).status).toBe(503);
     });
 });

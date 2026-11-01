@@ -2,7 +2,7 @@
 // and the app (chat cards). Every AI response is treated as untrusted input:
 // values are coerced to the expected shape and anything else is dropped.
 
-import type { AiCardData, NutritionInfo, ParsedWorkout, VitaminMineral, WaterEstimation } from '../types';
+import type { AiCardData, NutritionInfo, ParsedWorkout, VitaminMineral, WaterEstimation } from '../types.ts';
 
 export class AiParseError extends Error {}
 

@@ -1,6 +1,6 @@
-// Loading and saving the single per-user Firestore document users/{uid}
-// ({ profile, logs, waterData } — schema unchanged) plus a localStorage mirror
-// used as an offline fallback.
+// Per-user data: one row in public.user_data (profile, logs, water_data JSONB)
+// plus a localStorage mirror used as offline fallback and as a queue for
+// changes made while offline ("dirty" flag).
 
 import type { LoggedExercise, UserProfile, WaterData } from '../types';
 
@@ -38,9 +38,23 @@ export function normalizeUserData(raw: unknown): UserData {
     const log = isObj(water.log) ? (water.log as Record<string, number>) : {};
     return {
         profile: isObj(raw.profile) ? { ...base.profile, ...(raw.profile as Partial<UserProfile>) } : base.profile,
-        logs: isObj(raw.logs) ? (raw.logs as Record<string, LoggedExercise[]>) : base.logs,
+        logs: normalizeLogs(raw.logs),
         waterData: { ...base.waterData, ...(water as Partial<WaterData>), log },
     };
+}
+
+/**
+ * Logs are a map category → exercises. Rows written by the earlier Supabase
+ * prototype wrapped it as { v1: {...}, v2: [...] }; read v1 in that case.
+ */
+export function normalizeLogs(raw: unknown): Record<string, LoggedExercise[]> {
+    if (!isObj(raw)) return {};
+    const source = isObj(raw.v1) && ('v2' in raw || Object.keys(raw).length === 1) ? raw.v1 : raw;
+    const out: Record<string, LoggedExercise[]> = {};
+    for (const [category, list] of Object.entries(source)) {
+        if (Array.isArray(list)) out[category] = list as LoggedExercise[];
+    }
+    return out;
 }
 
 /** True when the data contains anything the user entered. */
@@ -52,32 +66,33 @@ export function hasUserContent(data: UserData): boolean {
     return profileFilled || logsFilled || waterFilled;
 }
 
-export type LoadSource = 'cloud' | 'migrated-local' | 'new' | 'offline-local' | 'offline-empty';
+export type LoadSource = 'cloud' | 'migrated-local' | 'local-unsynced' | 'new' | 'offline-local' | 'offline-empty';
 
 export interface LoadDecision {
     data: UserData;
     source: LoadSource;
-    /** Data that must be written to the cloud document (first login / migration). */
+    /** Data that must be written to the cloud row (first login / migration / unsynced edits). */
     writeToCloud: UserData | null;
 }
 
 /**
  * Decides what to show after login.
- *  - cloud doc exists → cloud wins
- *  - no cloud doc, but a local backup with content → upload the backup
- *    (users of the old web build only ever had data in localStorage because
- *    sync was broken; this keeps it instead of overwriting it with an empty doc)
- *  - neither → a fresh document
- *  - cloud unreachable → local backup (or empty), without writing
+ *  - local backup has unsynced edits (made offline) → keep them and upload
+ *  - cloud row exists → cloud wins
+ *  - no cloud row, but a local backup with content → upload the backup
+ *  - neither → a fresh row
+ *  - cloud unreachable → local backup (or empty); uploaded later
  */
 export function decideInitialData(
     cloud: { reachable: true; exists: boolean; data?: unknown } | { reachable: false },
     localBackup: unknown,
+    localDirty = false,
 ): LoadDecision {
     const local = localBackup === null || localBackup === undefined ? null : normalizeUserData(localBackup);
     if (!cloud.reachable) {
         return local ? { data: local, source: 'offline-local', writeToCloud: null } : { data: emptyUserData(), source: 'offline-empty', writeToCloud: null };
     }
+    if (local && localDirty) return { data: local, source: 'local-unsynced', writeToCloud: local };
     if (cloud.exists) return { data: normalizeUserData(cloud.data), source: 'cloud', writeToCloud: null };
     if (local && hasUserContent(local)) return { data: local, source: 'migrated-local', writeToCloud: local };
     const fresh = emptyUserData();
@@ -101,6 +116,25 @@ export function writeLocalBackup(uid: string, data: UserData): void {
     try {
         localStorage.setItem(backupKey(uid), JSON.stringify(data));
     } catch {
-        // Storage full or unavailable: the cloud copy (and Firestore's own cache) still exist.
+        // Storage full or unavailable: the cloud copy still exists.
+    }
+}
+
+const dirtyKey = (uid: string) => `gym_buddy_unsynced_${uid}`;
+
+export function isLocalDirty(uid: string): boolean {
+    try {
+        return localStorage.getItem(dirtyKey(uid)) === '1';
+    } catch {
+        return false;
+    }
+}
+
+export function setLocalDirty(uid: string, dirty: boolean): void {
+    try {
+        if (dirty) localStorage.setItem(dirtyKey(uid), '1');
+        else localStorage.removeItem(dirtyKey(uid));
+    } catch {
+        // ignore
     }
 }

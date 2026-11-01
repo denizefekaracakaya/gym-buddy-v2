@@ -1,15 +1,16 @@
-// Gemini proxy request handler (Web-standard Request/Response; runs on
-// Cloudflare Workers and in tests). Flow:
-//   CORS → method/path → size limit → Firebase ID token → rate limit →
+// Gemini proxy request handler (Web-standard Request/Response; runs as a
+// Supabase Edge Function and in Node tests). Flow:
+//   CORS → method → size limit → Supabase user token → rate limit →
 //   task validation → Gemini → response shaping.
 
-import { TASKS, InputError, type GeminiRequest } from './tasks';
-import { verifyFirebaseIdToken, AuthError, type TokenVerifier } from './auth';
-import { RateLimiter } from './rateLimit';
+import { TASKS, InputError, type GeminiRequest } from './tasks.ts';
+import { AuthError, type TokenVerifier } from './auth.ts';
+import { RateLimiter } from './rateLimit.ts';
 
 export interface Env {
     GEMINI_API_KEY: string;
-    FIREBASE_PROJECT_ID: string;
+    SUPABASE_URL: string;
+    SUPABASE_ANON_KEY: string;
     /** Comma-separated list of allowed browser origins. */
     ALLOWED_ORIGINS?: string;
     GEMINI_TEXT_MODEL?: string;
@@ -39,7 +40,7 @@ function corsHeaders(req: Request, env: Env): Record<string, string> {
     const allowed = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()) : DEFAULT_ORIGINS;
     const headers: Record<string, string> = {
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
         'Access-Control-Max-Age': '86400',
         Vary: 'Origin',
     };
@@ -87,10 +88,9 @@ export async function handle(req: Request, env: Env, deps: Deps): Promise<Respon
     const started = deps.now();
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-    if (url.pathname === '/health' && req.method === 'GET') return json(200, { ok: true }, cors);
-    if (url.pathname !== '/v1/ai') return err(404, 'not_found', 'Bulunamadı.', cors);
+    if (req.method === 'GET' && url.pathname.endsWith('/health')) return json(200, { ok: true, configured: !!env.GEMINI_API_KEY }, cors);
     if (req.method !== 'POST') return err(405, 'method_not_allowed', 'Yalnızca POST.', cors);
-    if (!env.GEMINI_API_KEY || !env.FIREBASE_PROJECT_ID) {
+    if (!env.GEMINI_API_KEY || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
         return err(503, 'not_configured', 'Yapay zeka servisi yapılandırılmamış.', cors);
     }
 
@@ -103,10 +103,10 @@ export async function handle(req: Request, env: Env, deps: Deps): Promise<Respon
     if (!token) return err(401, 'auth_required', 'Bu özelliği kullanmak için giriş yapın.', cors);
     let uid: string;
     try {
-        uid = await deps.verifyToken(token, env.FIREBASE_PROJECT_ID);
+        uid = await deps.verifyToken(token, env);
     } catch (e) {
         if (e instanceof AuthError) return err(401, 'auth_invalid', 'Oturum doğrulanamadı. Lütfen tekrar giriş yapın.', cors);
-        throw e;
+        return err(503, 'auth_unavailable', 'Kimlik doğrulama servisine ulaşılamadı. Lütfen tekrar deneyin.', cors);
     }
 
     // --- rate limit ---
@@ -167,4 +167,3 @@ export async function handle(req: Request, env: Env, deps: Deps): Promise<Respon
     }
 }
 
-export { verifyFirebaseIdToken };

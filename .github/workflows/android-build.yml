@@ -32,27 +32,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-
       - name: Install dependencies (lockfile)
         run: npm ci
 
       - name: Type check
         run: npm run typecheck
 
-      - name: Unit tests (calculators, parsers, AI proxy)
+      - name: Unit tests (calculators, parsers, data sync, AI edge function)
         run: npm test
 
-      - name: Firestore security rules tests (emulator)
-        run: npm run test:rules
-
       - name: Production web build
-        env:
-          # Public URL of the AI proxy (repository variable). Empty = AI disabled build.
-          VITE_AI_PROXY_URL: ${{ vars.AI_PROXY_URL }}
+        # Supabase URL/publishable key are public defaults in supabase.config.ts.
         run: npm run build
 
       - name: Scan bundle for secrets / dev URLs

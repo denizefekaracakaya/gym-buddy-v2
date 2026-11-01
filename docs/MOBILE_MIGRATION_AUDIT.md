@@ -1,5 +1,12 @@
 # Gym Buddy v2 — Mobile Migration Audit
 
+> **Update 2026-11-01:** after this audit the owner decided to replace Firebase
+> with Supabase. The Firebase findings below remain as the record of the starting
+> point; the current backend is described in `MOBILE_ARCHITECTURE.md`. Additional
+> finding made later the same day: the Firebase project had the **Email/Password
+> provider disabled** (`PASSWORD_LOGIN_DISABLED`), so only Google popup sign-in
+> existed, which cannot work inside an Android WebView.
+
 Audit date: 2026-11-01
 Audited commit: `23fff37` (`origin/main`, "docs: replace template with project README")
 Repository: https://github.com/denizefekaracakaya/gym-buddy-v2

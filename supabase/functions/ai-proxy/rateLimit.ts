@@ -1,5 +1,5 @@
 // Per-user fixed-window rate limiter kept in isolate memory.
-// This is a best-effort guard: Cloudflare may run several isolates, so the
+// This is a best-effort guard: Supabase may run several function instances, so the
 // effective limit can be a small multiple of the configured value. Hard cost
 // protection comes from the quota set on the Gemini API key itself
 // (see docs/MOBILE_SETUP.md).

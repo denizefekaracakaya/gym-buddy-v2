@@ -27,5 +27,11 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "android",
+    "supabase/functions/ai-proxy/index.ts"
+  ]
 }

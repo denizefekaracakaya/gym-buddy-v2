@@ -10,13 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-gym-buddy \"vitest run -c vitest.rules.config.ts\"",
     "android:sync": "vite build && cap sync android",
     "android:open": "cap open android",
     "android:assets": "node scripts/generate-brand-assets.mjs && capacitor-assets generate --android --assetPath resources --iconBackgroundColor \"#1D4ED8\" --iconBackgroundColorDark \"#1D4ED8\" --splashBackgroundColor \"#030712\" --splashBackgroundColorDark \"#030712\"",
-    "proxy:dev": "npx wrangler@4 dev --config server/ai-proxy/wrangler.toml",
-    "proxy:deploy": "npx wrangler@4 deploy --config server/ai-proxy/wrangler.toml",
-    "verify:bundle": "node scripts/verify-bundle.mjs"
+    "verify:bundle": "node scripts/verify-bundle.mjs",
+    "proxy:deploy": "npx supabase@2 functions deploy ai-proxy --no-verify-jwt --project-ref ksxjmzesbwaijiocwbwx"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
@@ -32,8 +30,8 @@
     "@capacitor/status-bar": "^8.0.4",
     "@fontsource/inter": "^5.3.0",
     "@google/genai": "^1.7.0",
+    "@supabase/supabase-js": "^2.118.0",
     "dompurify": "^3.4.17",
-    "firebase": "^12.15.0",
     "marked": "^18.1.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -42,7 +40,6 @@
   "devDependencies": {
     "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^8.6.0",
-    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/typography": "^0.5.20",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -51,8 +48,6 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.6.2",
-    "firebase-tools": "^15.34.2",
-    "jose": "^6.2.14",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.32",
     "tailwindcss": "^3.4.19",

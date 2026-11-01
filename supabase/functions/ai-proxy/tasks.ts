@@ -8,7 +8,7 @@ import {
     toParsedWorkout,
     toPlannedExercises,
     toWaterEstimation,
-} from '../../../lib/aiParse';
+} from '../../../lib/aiParse.ts';
 import {
     BODY_FAT_CATEGORY_LABELS,
     bodyFatCategory,
@@ -17,7 +17,7 @@ import {
     type ActivityLevel,
     type Goal,
     type Sex,
-} from '../../../lib/fitness';
+} from '../../../lib/fitness.ts';
 
 export class InputError extends Error {}
 

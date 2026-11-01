@@ -2,7 +2,7 @@
 
 A fitness and nutrition assistant for **Android** and the **web**. Plan workouts,
 log exercises, calculate calories and body fat, analyse meals, chat with an AI coach
-and track water intake — with your data synced per user via Firebase.
+and track water intake — with your data synced per user via Supabase.
 
 Built with **React 19**, **Vite**, **TypeScript**, **Tailwind CSS** and
 **Capacitor 8** (Android).
@@ -16,7 +16,7 @@ Built with **React 19**, **Vite**, **TypeScript**, **Tailwind CSS** and
 - **Meal Analyzer** — nutrition estimate from a photo (camera/gallery) or a description
 - **AI Buddy Chat** — fitness and nutrition coaching with nutrition/exercise cards; save suggested programs to the log
 - **Water Tracker** — daily goal, streaks, weekly and 30-day charts, AI photo estimate, reminders (native notifications on Android)
-- **Profile & sync** — Firebase Auth + Cloud Firestore, offline cache
+- **Profile & sync** — Supabase Auth + Postgres (row-level security), offline changes uploaded when back online
 
 ## Install the Android beta
 
@@ -30,9 +30,9 @@ See the release notes for the signing type and known issues.
 ```
 React app (Vite) ──► Capacitor 8 Android shell
    │                     camera · notifications · haptics · back button · status bar
-   ├─► Firebase Auth + Firestore  (users/{uid}: profile, logs, waterData)
-   └─► AI proxy (Cloudflare Worker, server/ai-proxy) ──► Google Gemini
-         verifies Firebase ID token · validates input · rate-limits · holds the API key
+   ├─► Supabase Auth + Postgres  (public.user_data: profile, logs, water_data; RLS)
+   └─► Supabase Edge Function ai-proxy ──► Google Gemini
+         verifies the user session · validates input · rate-limits · holds the API key
 ```
 
 The Gemini API key is **never** shipped in the app. Details:
@@ -44,7 +44,7 @@ Requirements: Node.js ≥ 22.12, JDK 21, Android SDK 36 (for Android builds).
 
 ```bash
 npm ci
-cp .env.example .env.local   # optional: VITE_AI_PROXY_URL=https://…workers.dev
+cp .env.example .env.local   # optional overrides
 npm run dev                  # http://localhost:3000
 ```
 
@@ -54,13 +54,12 @@ npm run dev                  # http://localhost:3000
 | `npm run build` | Production web build (`dist/`) |
 | `npm run typecheck` | TypeScript check |
 | `npm test` | Unit tests (Vitest) |
-| `npm run test:rules` | Firestore security-rules tests (emulator) |
 | `npm run verify:bundle` | Scan `dist/` for secrets / dev URLs |
 | `npm run android:sync` | Build + copy web assets into `android/` |
 | `npm run android:open` | Open the Android project in Android Studio |
-| `npm run proxy:deploy` | Deploy the AI proxy Worker |
+| `npm run proxy:deploy` | Deploy the `ai-proxy` Supabase Edge Function |
 
-Full setup (Firebase, AI proxy, signing, CI, releases):
+Full setup (Supabase, AI function, signing, CI, releases):
 [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md).
 
 ## Project structure
@@ -71,14 +70,13 @@ gym-buddy-v2/
 ├── components/              # Feature screens (+ shared/)
 ├── lib/                     # Pure logic: fitness formulas, dates, AI parsing, markdown sanitiser
 ├── services/
-│   ├── firebase.ts          # Auth + Firestore (named database, offline cache)
-│   ├── userData.ts / userSync.ts  # Load/save users/{uid}, local backup, migration
-│   ├── geminiService.ts     # Client for the AI proxy
+│   ├── supabase.ts          # Supabase client, auth error messages, deep-link URL
+│   ├── userData.ts / userSync.ts  # Load/save user_data row, local backup, offline queue
+│   ├── geminiService.ts     # Client for the AI edge function
 │   └── native.ts            # Capacitor wrappers (camera, notifications, haptics, links)
-├── server/ai-proxy/         # Cloudflare Worker (Gemini proxy)
+├── supabase/                # migrations/ (schema + RLS), functions/ai-proxy (Gemini proxy)
 ├── android/                 # Capacitor Android project
-├── tests/                   # Vitest unit tests + Firestore rules tests
-├── firestore.rules          # Security rules
+├── tests/                   # Vitest unit tests
 └── docs/                    # Audit, architecture, setup, release report
 ```
 

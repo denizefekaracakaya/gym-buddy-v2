@@ -10,6 +10,7 @@ import Login from './components/Login';
 import BodyFatCalculator from './components/BodyFatCalculator';
 import WaterTracker from './components/WaterTracker';
 import Spinner from './components/shared/Spinner';
+import PasswordRecovery from './components/PasswordRecovery';
 import {
     DumbbellIcon,
     CalculatorIcon,
@@ -24,9 +25,9 @@ import {
     OfflineIcon,
 } from './constants';
 import { parseWorkoutFromText } from './services/geminiService';
-import { auth, onAuthStateChanged, signOut } from './services/firebase';
+import { auth } from './services/supabase';
 import { emptyUserData } from './services/userData';
-import { loadUserData, saveUserData } from './services/userSync';
+import { loadUserData, saveUserData, flushPending } from './services/userSync';
 import { isNative, scheduleWaterReminders, cancelWaterReminders, hapticTap } from './services/native';
 import { localDateKey } from './lib/date';
 import { App as CapApp } from '@capacitor/app';
@@ -50,6 +51,8 @@ const App: React.FC = () => {
     const [moreOpen, setMoreOpen] = useState(false);
     const [online, setOnline] = useState(true);
     const [todayKey, setTodayKey] = useState(() => localDateKey());
+    const [recoveryMode, setRecoveryMode] = useState(false);
+    const [authNotice, setAuthNotice] = useState<string | null>(null);
 
     const [userProfile, setUserProfile] = useState<UserProfile>(() => emptyUserData().profile);
     const [logs, setLogs] = useState<Record<string, LoggedExercise[]>>({});
@@ -68,17 +71,22 @@ const App: React.FC = () => {
 
     // ---------- auth + initial data ----------
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        let loadedFor: string | null = null;
+        const applyUser = async (user: { id: string; email?: string | null } | null) => {
             if (user) {
-                setCurrentUser(user.uid);
-                setUserEmail(user.email);
-                const { data } = await loadUserData(user.uid);
-                setUserProfile(data.profile);
-                setLogs(data.logs);
-                setWaterData(data.waterData);
-                setHasLoadedFromDb(true);
-                setActiveTabState((prev) => (prev === NavigationTab.LOGIN ? NavigationTab.PROFILE : prev));
+                setCurrentUser(user.id);
+                setUserEmail(user.email ?? null);
+                if (loadedFor !== user.id) {
+                    loadedFor = user.id;
+                    const { data } = await loadUserData(user.id);
+                    setUserProfile(data.profile);
+                    setLogs(data.logs);
+                    setWaterData(data.waterData);
+                    setHasLoadedFromDb(true);
+                    setActiveTabState((prev) => (prev === NavigationTab.LOGIN ? NavigationTab.PROFILE : prev));
+                }
             } else {
+                loadedFor = null;
                 const empty = emptyUserData();
                 setCurrentUser(null);
                 setUserEmail(null);
@@ -88,8 +96,36 @@ const App: React.FC = () => {
                 setHasLoadedFromDb(false);
             }
             setAuthLoading(false);
+        };
+        // The callback must not await Supabase calls directly (it runs inside the
+        // auth lock), so the data load is deferred.
+        const { data: sub } = auth.onAuthStateChange((event, session) => {
+            if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+            setTimeout(() => applyUser(session?.user ?? null), 0);
         });
-        return () => unsubscribe();
+        return () => sub.subscription.unsubscribe();
+    }, []);
+
+    // E-mail links (sign-up confirmation, password reset) open the app through
+    // io.github.denizefekaracakaya.gymbuddy://auth-callback?code=… (PKCE).
+    useEffect(() => {
+        if (!isNative) return;
+        let remove: (() => void) | undefined;
+        CapApp.addListener('appUrlOpen', async ({ url }) => {
+            if (!url.startsWith('io.github.denizefekaracakaya.gymbuddy://auth-callback')) return;
+            const params = new URL(url.replace('#', '?')).searchParams;
+            const code = params.get('code');
+            const errorDescription = params.get('error_description');
+            if (errorDescription) {
+                setAuthNotice('Bağlantı geçersiz veya süresi dolmuş. Lütfen tekrar deneyin.');
+                return;
+            }
+            if (code) {
+                const { error } = await auth.exchangeCodeForSession(code);
+                setAuthNotice(error ? 'Bağlantı geçersiz veya süresi dolmuş. Lütfen tekrar deneyin.' : 'E-posta adresiniz doğrulandı.');
+            }
+        }).then((h) => (remove = () => h.remove()));
+        return () => remove?.();
     }, []);
 
     // ---------- persistence ----------
@@ -111,6 +147,11 @@ const App: React.FC = () => {
     }, [userProfile, logs, waterData, currentUser, hasLoadedFromDb, flushSave]);
 
     // ---------- app lifecycle, back button, network ----------
+    // Upload changes made while offline as soon as the connection is back.
+    useEffect(() => {
+        if (online && currentUser && hasLoadedFromDb) flushPending(currentUser).catch(() => undefined);
+    }, [online, currentUser, hasLoadedFromDb]);
+
     const flushRef = useRef(flushSave);
     flushRef.current = flushSave;
     const backRef = useRef<() => void>(() => undefined);
@@ -193,7 +234,7 @@ const App: React.FC = () => {
         try {
             flushSave();
             await cancelWaterReminders().catch(() => undefined);
-            await signOut(auth);
+            await auth.signOut();
             tabHistory.current = [];
             setActiveTabState(NavigationTab.WORKOUTS);
         } catch (error) {
@@ -372,7 +413,24 @@ const App: React.FC = () => {
                 ))}
             </nav>
 
-            <main className="w-full max-w-6xl flex-grow px-3 pt-4 sm:px-6 sm:pt-0 lg:px-8 app-main">{renderContent()}</main>
+            <main className="w-full max-w-6xl flex-grow px-3 pt-4 sm:px-6 sm:pt-0 lg:px-8 app-main">
+                {authNotice && (
+                    <div className="max-w-md mx-auto mb-4 p-3 rounded-lg bg-blue-900/40 border border-blue-800 text-blue-100 text-sm flex justify-between gap-3" role="status">
+                        <span>{authNotice}</span>
+                        <button onClick={() => setAuthNotice(null)} aria-label="Kapat" className="min-w-[32px]">✕</button>
+                    </div>
+                )}
+                {recoveryMode && isLoggedIn ? (
+                    <PasswordRecovery
+                        onDone={(msg) => {
+                            setRecoveryMode(false);
+                            setAuthNotice(msg);
+                        }}
+                    />
+                ) : (
+                    renderContent()
+                )}
+            </main>
 
             <footer className="hidden sm:block w-full max-w-6xl text-center mt-12 py-4 border-t border-slate-800">
                 <p className="text-slate-500 text-sm">Gym Buddy © 2024 - Tüm Hakları Saklıdır.</p>

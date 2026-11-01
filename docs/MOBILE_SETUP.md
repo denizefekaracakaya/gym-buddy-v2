@@ -5,72 +5,69 @@
 | Tool | Version |
 |---|---|
 | Node.js | ≥ 22.12 (CI uses 22) |
-| JDK | 21 (Gradle and the Firestore emulator; make sure `java -version` on PATH is 21) |
+| JDK | 21 (Gradle; make sure `java -version` on PATH is 21) |
 | Android SDK | platform 36, build-tools 36.0.0 (Android Studio Otter or newer) |
-| Cloudflare account | free plan, for the AI proxy |
+| Supabase | project `gym-buddy-ai` (`ksxjmzesbwaijiocwbwx`), free plan |
 
 ## Install and run (web)
 
 ```bash
 npm ci
-cp .env.example .env.local     # set VITE_AI_PROXY_URL (optional)
+cp .env.example .env.local     # optional overrides; defaults point to the Supabase project
 npm run dev                    # http://localhost:3000
 ```
 
 `.env*` files are git-ignored. **Only `VITE_*` values reach the app and they are
 public.** The Gemini key must never be placed in any `.env` used by Vite.
 
-## Environment variables
+## Configuration
 
 | Name | Where | Secret? | Purpose |
 |---|---|---|---|
-| `VITE_AI_PROXY_URL` | `.env.local` / GitHub repo **variable** `AI_PROXY_URL` | no | Base URL of the Worker, e.g. `https://gym-buddy-ai-proxy.<subdomain>.workers.dev`. Empty → app builds with AI features disabled (UI says so). |
-| `GEMINI_API_KEY` | Cloudflare Worker **secret** | **yes** | Google AI Studio key. Only on the server. |
-| `FIREBASE_PROJECT_ID`, `ALLOWED_ORIGINS`, `GEMINI_TEXT_MODEL`, `GEMINI_IMAGE_MODEL`, `RATE_PER_MINUTE`, `RATE_PER_DAY` | `server/ai-proxy/wrangler.toml` `[vars]` | no | Proxy configuration |
-| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | GitHub Actions **secrets** | **yes** | Release signing (optional; see below) |
+| Supabase URL + publishable key | `supabase.config.ts` (override: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`) | no | Client access; protected by RLS |
+| `VITE_AI_DISABLED` | build env | no | `true` builds without AI features |
+| `GEMINI_API_KEY` | Supabase → Edge Functions → **Secrets** | **yes** | Google AI Studio key, server only |
+| `GEMINI_TEXT_MODEL`, `GEMINI_IMAGE_MODEL`, `RATE_PER_MINUTE`, `RATE_PER_DAY`, `ALLOWED_ORIGINS` | Edge Function secrets (optional) | no | Model / limit overrides |
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | GitHub Actions secrets | **yes** | Release signing (optional) |
 
-## Firebase
+Never use the Supabase `service_role` / `sb_secret_…` key in the app; the bundle
+scan (`npm run verify:bundle`) fails the build if one appears.
 
-* Project `gen-lang-client-0975287872`, Firestore database
-  `ai-studio-remixgymbuddyaif-6e5a3d3a-d4cf-4d06-9291-985e69cfe7a4` (named DB),
-  config in `firebase-applet-config.json` (public client config).
-* **Authentication providers — action required by the owner:** at audit time
-  *Email/Password is disabled* (`PASSWORD_LOGIN_DISABLED`) and only Google is
-  enabled. Google sign-in is a browser popup and is not available in the Android
-  app, so on Android nobody can sign in until **Firebase console → Authentication →
-  Sign-in method → Email/Password → Enable** is switched on. No app change is needed
-  after enabling it.
-* Security rules: `firestore.rules`; `firebase.json` targets the named database.
-  Deploy (owner, after review): `npx firebase-tools deploy --only firestore:rules`.
-  The new rules only accept the three fields the app writes
-  (`profile`, `logs`, `waterData`); see `tests/rules/`.
+## Supabase
 
-## AI proxy (Cloudflare Worker)
+1. **Database:** apply `supabase/migrations/*.sql` (SQL editor, or
+   `npx supabase@2 db push --project-ref ksxjmzesbwaijiocwbwx`). The table
+   `public.user_data` already exists; the migration hardens it (owner-only RLS
+   for `authenticated`, no `anon` access, JSON object + size checks, `updated_at`
+   trigger). Existing rows are kept.
+2. **Auth:** Authentication → Providers → Email enabled (default). Under
+   Authentication → URL Configuration add the redirect URL
+   `io.github.denizefekaracakaya.gymbuddy://auth-callback` so confirmation and
+   password-reset e-mails open the app. (Without it, links fall back to the Site
+   URL: the e-mail is still confirmed, the user then logs in manually; password
+   reset needs the redirect URL.) The default Supabase e-mail sender is
+   rate-limited (a few e-mails per hour) — configure custom SMTP before a wider beta.
+3. **AI function:**
+   ```bash
+   npx supabase@2 login
+   npm run proxy:deploy        # = supabase functions deploy ai-proxy --no-verify-jwt
+   ```
+   then Dashboard → Edge Functions → Secrets → add `GEMINI_API_KEY`.
+   Health check: `GET https://ksxjmzesbwaijiocwbwx.supabase.co/functions/v1/ai-proxy/health`
+   → `{"ok":true,"configured":true}`.
+   `verify_jwt` is off on purpose (CORS preflight); the function itself rejects
+   requests without a logged-in user's token.
+4. Free-plan projects are **paused after ~7 days without activity**; the app then
+   cannot log in or sync until the project is restored in the dashboard.
 
-```bash
-npx wrangler@4 login                                    # once, opens the browser
-npx wrangler@4 secret put GEMINI_API_KEY --config server/ai-proxy/wrangler.toml
-npm run proxy:deploy                                    # prints the workers.dev URL
-curl https://<url>/health                               # {"ok":true}
-```
-
-Then set the GitHub repository variable `AI_PROXY_URL` (Settings → Secrets and
-variables → Actions → Variables) and/or `VITE_AI_PROXY_URL` in `.env.local`, and
-rebuild the app. The CSP in the production build automatically allows that origin.
-
-Recommended: in Google Cloud console set a quota / budget alert on the Gemini key,
-and rotate the key that was previously compiled into the web bundle (it must be
-considered leaked).
-
-Local proxy: `npm run proxy:dev` (needs a `.dev.vars` file in `server/ai-proxy/`
-with `GEMINI_API_KEY=...`; it is git-ignored via `.env*`/`.wrangler` rules — do not commit it).
+Recommended: set a quota / budget alert on the Gemini key in Google Cloud and
+rotate the key that used to be compiled into the web bundle.
 
 ## Tests
 
 ```bash
 npm run typecheck
-npm test               # unit tests: formulas, dates, data migration, AI parsing, sanitiser, proxy handler
-npm run test:rules     # Firestore rules in the emulator (needs JDK 21 on PATH)
+npm test               # unit tests: formulas, dates, data sync logic, AI parsing, sanitiser, edge function
 npm run build && npm run verify:bundle   # production build + secret/dev-URL scan
 ```
 
@@ -113,8 +110,8 @@ Icons/splash are generated from `scripts/generate-brand-assets.mjs`:
 
 Triggers: PRs to `main`, pushes to `feat/android-mobile`, tags `v*-beta.*`, manual.
 
-1. **test** — `npm ci` (lockfile), typecheck, unit tests, rules tests (emulator),
-   production build with `vars.AI_PROXY_URL`, bundle secret scan.
+1. **test** — `npm ci` (lockfile), typecheck, unit tests, production build,
+   bundle secret scan.
 2. **android** — `cap sync`, Gradle `assembleRelease bundleRelease`, then verifies the
    APK (signature, package id, versionName, not debuggable, secret scan of the
    packaged web assets), computes SHA-256, uploads APK/AAB/checksums + Gradle log.
