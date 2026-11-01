@@ -1,50 +1,35 @@
-
-
-
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { analyzeMealImage, analyzeMealFromText, getErrorMessage } from '../services/geminiService';
 import type { NutritionInfo } from '../types';
 import Spinner from './shared/Spinner';
 import Card from './shared/Card';
 import PieChart from './shared/PieChart';
+import AiNotice, { aiAvailable } from './shared/AiNotice';
+import ImagePickerButton from './shared/ImagePickerButton';
+import type { PickedImage } from '../services/native';
 import { CameraIcon } from '../constants';
 
-const toBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(',')[1]);
-        };
-        reader.onerror = error => reject(error);
-    });
+interface MealAnalyzerProps {
+    isLoggedIn: boolean;
+    onLoginRedirect: () => void;
+}
 
-const MealAnalyzer: React.FC = () => {
+const MealAnalyzer: React.FC<MealAnalyzerProps> = ({ isLoggedIn, onLoginRedirect }) => {
     const [analysisMode, setAnalysisMode] = useState<'image' | 'manual'>('image');
     const [manualInput, setManualInput] = useState<string>('');
     const [manualWeight, setManualWeight] = useState<string>('');
-    const [imageSrc, setImageSrc] = useState<string | null>(null);
-    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [image, setImage] = useState<PickedImage | null>(null);
     const [result, setResult] = useState<NutritionInfo | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const canUseAi = aiAvailable(isLoggedIn);
 
-    const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            setResult(null);
-            setError(null);
-            setImageFile(file);
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                setImageSrc(e.target?.result as string);
-            };
-            reader.readAsDataURL(file);
-        }
+    const handleImagePicked = (picked: PickedImage) => {
+        setResult(null);
+        setError(null);
+        setImage(picked);
     };
-    
+
     const handleAnalyzeClick = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -52,9 +37,8 @@ const MealAnalyzer: React.FC = () => {
 
         try {
             let analysisResult: NutritionInfo;
-            if (analysisMode === 'image' && imageFile) {
-                const base64Image = await toBase64(imageFile);
-                analysisResult = await analyzeMealImage(base64Image, imageFile.type);
+            if (analysisMode === 'image' && image) {
+                analysisResult = await analyzeMealImage(image.base64, image.mimeType);
             } else if (analysisMode === 'manual' && manualInput.trim()) {
                 analysisResult = await analyzeMealFromText(manualInput.trim(), manualWeight);
             } else {
@@ -68,19 +52,15 @@ const MealAnalyzer: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
-    }, [analysisMode, imageFile, manualInput, manualWeight]);
+    }, [analysisMode, image, manualInput, manualWeight]);
 
 
     const handleReset = () => {
-        setImageSrc(null);
-        setImageFile(null);
+        setImage(null);
         setResult(null);
         setError(null);
         setManualInput('');
         setManualWeight('');
-        if(fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
     }
 
     const pieChartData = result ? [
@@ -91,7 +71,7 @@ const MealAnalyzer: React.FC = () => {
 
     const totalMacros = result ? result.carbohydrates + result.protein + result.fat : 0;
     
-    const canAnalyze = (analysisMode === 'image' && imageFile !== null) || (analysisMode === 'manual' && manualInput.trim().length > 0);
+    const canAnalyze = (analysisMode === 'image' && image !== null) || (analysisMode === 'manual' && manualInput.trim().length > 0);
 
     return (
         <div className="animate-fade-in max-w-4xl mx-auto">
@@ -116,8 +96,8 @@ const MealAnalyzer: React.FC = () => {
                 
                 {analysisMode === 'image' && (
                     <div className="space-y-4">
-                        {imageSrc ? (
-                            <img src={imageSrc} alt="Yemek önizlemesi" className="w-full max-h-80 object-contain rounded-lg bg-slate-800" />
+                        {image ? (
+                            <img src={image.dataUrl} alt="Yemek önizlemesi" className="w-full max-h-80 object-contain rounded-lg bg-slate-800" />
                         ) : (
                              <div className="text-center p-6 border-2 border-dashed border-slate-700 rounded-lg">
                                 <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-slate-700">
@@ -126,20 +106,14 @@ const MealAnalyzer: React.FC = () => {
                                 <p className="mt-2 text-slate-400">Analiz için fotoğraf çekin veya yükleyin.</p>
                             </div>
                         )}
-                         <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleImageChange}
-                            accept="image/*"
-                            capture="environment"
-                            className="hidden"
-                        />
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="w-full bg-slate-700 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-600 transition-colors duration-300"
+                        <ImagePickerButton
+                            onPicked={handleImagePicked}
+                            onError={setError}
+                            disabled={isLoading}
+                            className="w-full bg-slate-700 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-600 active:bg-slate-600 transition-colors duration-300 min-h-[48px]"
                         >
-                            {imageSrc ? 'Fotoğrafı Değiştir' : 'Fotoğraf Çek / Yükle'}
-                        </button>
+                            {image ? 'Fotoğrafı Değiştir' : 'Fotoğraf Çek / Yükle'}
+                        </ImagePickerButton>
                     </div>
                 )}
                 
@@ -150,6 +124,7 @@ const MealAnalyzer: React.FC = () => {
                             <textarea
                                 id="manual-meal-input"
                                 rows={4}
+                                maxLength={1000}
                                 value={manualInput}
                                 onChange={(e) => setManualInput(e.target.value)}
                                 placeholder="Örnek: 1 tabak tavuklu pilav, yanında bol yeşillikli salata..."
@@ -161,6 +136,9 @@ const MealAnalyzer: React.FC = () => {
                             <input
                                 id="manual-meal-weight"
                                 type="number"
+                                inputMode="numeric"
+                                min="1"
+                                max="5000"
                                 value={manualWeight}
                                 onChange={(e) => setManualWeight(e.target.value)}
                                 placeholder="Örn: 350"
@@ -170,10 +148,12 @@ const MealAnalyzer: React.FC = () => {
                     </div>
                 )}
 
+                <AiNotice isLoggedIn={isLoggedIn} onLoginRedirect={onLoginRedirect} className="mt-6" />
+
                 <div className="flex flex-col sm:flex-row gap-4 mt-6">
                     <button
                         onClick={handleAnalyzeClick}
-                        disabled={isLoading || !canAnalyze}
+                        disabled={isLoading || !canAnalyze || !canUseAi}
                         className="flex-grow w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300 flex items-center justify-center gap-2"
                     >
                         {isLoading ? 'Analiz Ediliyor...' : 'Analiz Et'}

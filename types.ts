@@ -1,9 +1,3 @@
-
-
-
-
-
-
 export enum NavigationTab {
   WORKOUTS = 'Egzersizler',
   WORKOUT_LOG = 'Not Defteri',
@@ -31,7 +25,10 @@ export interface Exercise {
   name: string;
   description: string;
   keyPoints: string[];
-  imageUrl: string;
+  /** English prompt for the optional AI illustration. */
+  imagePromptEn?: string;
+  /** data: URL of the generated illustration, when available. */
+  imageUrl?: string;
 }
 
 export interface CalorieFormData {

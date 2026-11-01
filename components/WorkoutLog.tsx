@@ -21,6 +21,13 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
     const [warmupTargets, setWarmupTargets] = useState<Record<string, string>>({});
     const [searchQuery, setSearchQuery] = useState<string>('');
 
+    // Categories saved from AI Buddy may not be one of the predefined muscle
+    // groups; show them too so those exercises are reachable here.
+    const categories = useMemo(
+        () => [...MUSCLE_GROUPS, ...Object.keys(logs).filter((c) => !MUSCLE_GROUPS.includes(c) && (logs[c] || []).length > 0)],
+        [logs],
+    );
+
     const handleSaveBodyWeight = useCallback((e: React.FormEvent) => {
         e.preventDefault();
         if (!bodyWeight.trim()) return;
@@ -204,6 +211,7 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
                         <div className="relative flex-1">
                             <input
                                 type="number"
+                                inputMode="decimal"
                                 step="0.1"
                                 placeholder="Örn: 75.5"
                                 value={bodyWeight}
@@ -233,11 +241,11 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
             {/* Muscle Group Categorization */}
             <Card>
                 <div className="grid grid-cols-3 sm:grid-cols-9 gap-2">
-                    {MUSCLE_GROUPS.map((muscle) => (
+                    {categories.map((muscle) => (
                         <button
                             key={muscle}
                             onClick={() => setSelectedCategory(muscle)}
-                            className={`px-2 py-2 text-xs font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                            className={`px-2 py-2 min-h-[44px] text-xs font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
                                 selectedCategory === muscle
                                     ? 'bg-blue-600 text-white shadow-md'
                                     : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
@@ -384,6 +392,7 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
                                     <div className="relative w-full md:w-28">
                                         <input
                                             type="number"
+                                            inputMode="decimal"
                                             placeholder="Çalışma (kg)"
                                             value={warmupTargets[exercise.id] || ''}
                                             onChange={(e) => setWarmupTargets(prev => ({ ...prev, [exercise.id]: e.target.value }))}
@@ -459,6 +468,7 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
                                                 <div className="relative">
                                                     <input 
                                                         type="number"
+                                                        inputMode="decimal"
                                                         placeholder={setType === 'bodyweight' ? (userProfile.weight || '--') : '--'}
                                                         value={log.weight}
                                                         onChange={(e) => handleLogChange(selectedCategory, exercise.id, setIndex, 'weight', e.target.value)}
@@ -482,6 +492,7 @@ const WorkoutLog: React.FC<WorkoutLogProps> = ({ logs, setLogs, userProfile, set
                                             <div className="col-span-3">
                                                 <input 
                                                     type="number"
+                                                    inputMode="decimal"
                                                     placeholder="--"
                                                     value={log.reps}
                                                     onChange={(e) => handleLogChange(selectedCategory, exercise.id, setIndex, 'reps', e.target.value)}
