@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+keystore.properties
+service-account*.json
+
+# Test / emulator output
+coverage
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.wrangler
+.dev.vars

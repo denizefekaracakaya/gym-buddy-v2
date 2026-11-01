@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Safe areas: Capacitor 8 draws the WebView edge-to-edge on Android and exposes
+ * the system-bar sizes as env(safe-area-inset-*) (viewport-fit=cover in index.html).
+ */
+:root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --bottom-nav-h: 57px;
+    color-scheme: dark;
+}
+
+html,
+body {
+    background-color: #030712; /* gray-950 */
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+}
+
+.app-header {
+    padding-top: var(--safe-top);
+}
+
+@media (max-width: 639px) {
+    .app-main {
+        padding-bottom: calc(var(--bottom-nav-h) + var(--safe-bottom) + 24px);
+    }
+    /* Prevent iOS/Android zoom-on-focus and give inputs comfortable size. */
+    input,
+    select,
+    textarea {
+        font-size: 16px !important;
+    }
+}
+
+.bottom-nav {
+    padding-bottom: var(--safe-bottom);
+}
+
+.more-sheet {
+    padding-bottom: calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px);
+}
+
+.tap-target {
+    min-width: 44px;
+    min-height: 44px;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.25s ease-out both; }
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-fade-in-up { animation: none; }
+}
+
+/* Chat fills the space between header and bottom nav; shrinks with the keyboard (dvh). */
+.chat-container {
+    height: calc(100vh - 280px);
+    min-height: 360px;
+}
+@media (max-width: 639px) {
+    .chat-container {
+        height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--bottom-nav-h) - 100px);
+        min-height: 280px;
+    }
+}
+
+body.keyboard-open {
+    --bottom-nav-h: 0px;
+}
+body.keyboard-open .bottom-nav {
+    display: none;
+}
