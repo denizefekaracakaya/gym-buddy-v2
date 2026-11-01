@@ -1,116 +1,68 @@
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  signOut, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  onAuthStateChanged
+import {
+    getAuth,
+    initializeAuth,
+    indexedDBLocalPersistence,
+    browserLocalPersistence,
+    GoogleAuthProvider,
+    signInWithPopup,
+    signOut,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
+    onAuthStateChanged,
+    type Auth,
 } from 'firebase/auth';
-import { 
-  initializeFirestore, 
-  doc, 
-  getDoc, 
-  getDocFromServer,
-  setDoc, 
-  updateDoc,
-  enableMultiTabIndexedDbPersistence
+import {
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager,
+    doc,
+    getDoc,
+    setDoc,
 } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 import firebaseConfig from '../firebase-applet-config.json';
+
+export const isNative = Capacitor.isNativePlatform();
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with specific database ID from config
-const db = initializeFirestore(app, {
-  databaseId: firebaseConfig.firestoreDatabaseId
-});
+// The project uses a *named* Firestore database. It must be passed as the
+// third argument; the previous code put it inside the settings object, where
+// it was ignored, so the app talked to the non-existent "(default)" database
+// and no data was ever synced.
+const db = initializeFirestore(
+    app,
+    { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) },
+    firebaseConfig.firestoreDatabaseId,
+);
 
-// Enable multi-tab offline persistence
-if (typeof window !== 'undefined') {
-  enableMultiTabIndexedDbPersistence(db).catch((err) => {
-    console.warn("Firestore offline persistence could not be enabled:", err.message);
-  });
-}
+// In the Android WebView we initialise Auth explicitly with IndexedDB
+// persistence and without the popup/redirect resolver (which loads iframes
+// that do not work from the https://localhost app origin).
+const auth: Auth = isNative
+    ? initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] })
+    : getAuth(app);
 
-const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+/** Google sign-in uses a popup, which is only available in browsers. */
+export const googleSignInAvailable = !isNative;
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Please check your Firebase configuration. Firestore connection is currently offline.");
-    }
-  }
-}
-testConnection();
-
-export { 
-  app, 
-  db, 
-  auth, 
-  googleProvider, 
-  signInWithPopup, 
-  signOut, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  onAuthStateChanged,
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc
+export {
+    app,
+    db,
+    auth,
+    googleProvider,
+    signInWithPopup,
+    signOut,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
+    onAuthStateChanged,
+    doc,
+    getDoc,
+    setDoc,
 };
-
-
