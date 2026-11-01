@@ -1,12 +1,24 @@
 
 
 
-import React, { useState, useCallback } from 'react';
-import { generateWorkoutPlan, getErrorMessage } from '../services/geminiService';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { generateWorkoutPlan, generateExerciseImage, getErrorMessage } from '../services/geminiService';
 import type { Exercise } from '../types';
-import { MUSCLE_GROUPS, CheckCircleIcon, PlayIcon } from '../constants';
+import { MUSCLE_GROUPS, CheckCircleIcon, PlayIcon, DumbbellIcon } from '../constants';
 import Spinner from './shared/Spinner';
 import Card from './shared/Card';
+import AiNotice, { aiAvailable } from './shared/AiNotice';
+import { openExternal } from '../services/native';
+
+/** Shown while an illustration loads or when image generation is unavailable. */
+const ExerciseImagePlaceholder: React.FC<{ loading: boolean }> = ({ loading }) => (
+    <div className="w-full h-48 rounded-lg mb-4 bg-gradient-to-br from-slate-800 to-blue-950 flex flex-col items-center justify-center text-blue-400/70">
+        <div className={loading ? 'animate-pulse' : ''}>
+            <DumbbellIcon />
+        </div>
+        {loading && <span className="text-xs text-slate-400 mt-2">Görsel hazırlanıyor…</span>}
+    </div>
+);
 
 const EQUIPMENT_OPTIONS = ['Tümü', 'Makine', 'Serbest Ağırlık', 'Vücut Ağırlığı'];
 const equipmentMapping: { [key: string]: string } = {
@@ -53,11 +65,47 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ isLoggedIn, onSa
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [isSaved, setIsSaved] = useState<boolean>(false);
+    const [images, setImages] = useState<Record<number, string | 'loading' | 'failed'>>({});
+    const planId = useRef(0);
+    const canUseAi = aiAvailable(isLoggedIn);
+
+    // Illustrations are generated one by one after the plan is shown (the
+    // original fired one image request per exercise in parallel before showing
+    // anything). If the image model is unavailable, we stop after the first failure.
+    useEffect(() => {
+        if (!exercises || exercises.length === 0) return;
+        const id = ++planId.current;
+        let cancelled = false;
+        (async () => {
+            for (let i = 0; i < exercises.length; i++) {
+                const prompt = exercises[i].imagePromptEn || `A fit person performing ${exercises[i].name} in a gym, photo`;
+                if (cancelled || planId.current !== id) return;
+                setImages((prev) => ({ ...prev, [i]: 'loading' }));
+                try {
+                    const url = await generateExerciseImage(prompt);
+                    if (cancelled || planId.current !== id) return;
+                    setImages((prev) => ({ ...prev, [i]: url }));
+                } catch {
+                    if (cancelled || planId.current !== id) return;
+                    setImages((prev) => {
+                        const next = { ...prev };
+                        for (let j = i; j < exercises.length; j++) next[j] = 'failed';
+                        return next;
+                    });
+                    return;
+                }
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [exercises]);
     
     const handleGeneratePlan = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         setExercises(null);
+        setImages({});
         setIsSaved(false); // Reset save state for new plan
         try {
             const equipmentKey = equipmentMapping[selectedEquipment];
@@ -89,12 +137,12 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ isLoggedIn, onSa
                 <p className="text-slate-400 mb-6">Hedeflerinizi seçin ve yapay zekanın sizin için bir antrenman oluşturmasını izleyin.</p>
                 
                 <h3 className="text-lg font-semibold text-slate-300 mb-3">1. Kas Grubu Seçin</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
                     {MUSCLE_GROUPS.map((muscle) => (
                         <button
                             key={muscle}
                             onClick={() => setSelectedMuscle(muscle)}
-                            className={`px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-blue-500 ${
+                            className={`px-2 sm:px-4 py-2.5 min-h-[44px] text-sm font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-blue-500 ${
                                 selectedMuscle === muscle
                                     ? 'bg-blue-600 text-white shadow'
                                     : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -111,7 +159,7 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ isLoggedIn, onSa
                         <button
                             key={equip}
                             onClick={() => setSelectedEquipment(equip)}
-                            className={`px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-blue-500 ${
+                            className={`px-2 sm:px-4 py-2.5 min-h-[44px] text-sm font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-blue-500 ${
                                 selectedEquipment === equip
                                     ? 'bg-indigo-600 text-white shadow'
                                     : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -150,9 +198,11 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ isLoggedIn, onSa
                     </div>
                 </div>
 
+                <AiNotice isLoggedIn={isLoggedIn} onLoginRedirect={onLoginRedirect} className="mt-6" />
+
                 <button
                     onClick={handleGeneratePlan}
-                    disabled={isLoading}
+                    disabled={isLoading || !canUseAi}
                     className="mt-6 w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
                 >
                     {isLoading ? 'Plan Oluşturuluyor...' : 'Antrenman Planı Oluştur'}
@@ -186,27 +236,26 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ isLoggedIn, onSa
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {exercises.map((exercise, index) => (
                             <Card key={index} className="flex flex-col">
-                                <img 
-                                    src={exercise.imageUrl} 
-                                    alt={`${exercise.name} egzersizi`}
-                                    className="w-full h-48 object-cover rounded-lg mb-4 bg-slate-700"
-                                    onError={(e) => {
-                                        const target = e.target as HTMLImageElement;
-                                        target.onerror = null; // prevent infinite loop
-                                        target.src = 'https://via.placeholder.com/500x300.png?text=G%C3%B6rsel+Y%C3%BCklenemedi';
-                                    }}
-                                />
+                                {typeof images[index] === 'string' && images[index]!.startsWith('data:') ? (
+                                    <img
+                                        src={images[index]}
+                                        alt={`${exercise.name} egzersizi`}
+                                        className="w-full h-48 object-cover rounded-lg mb-4 bg-slate-700"
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    <ExerciseImagePlaceholder loading={images[index] === 'loading'} />
+                                )}
                                 <h3 className="text-xl font-bold text-blue-400 mb-2">{exercise.name}</h3>
                                 
-                                <a 
-                                    href={`https://www.youtube.com/results?search_query=${encodeURIComponent(exercise.name + " nasıl yapılır")}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 text-white bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors mb-4 w-fit shadow-md shadow-red-900/20"
+                                <button
+                                    type="button"
+                                    onClick={() => openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(exercise.name + ' nasıl yapılır')}`)}
+                                    className="inline-flex items-center gap-2 text-white bg-red-600 hover:bg-red-500 active:bg-red-500 px-4 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors mb-4 w-fit shadow-md shadow-red-900/20"
                                 >
                                     <PlayIcon />
                                     Video Anlatımı İzle
-                                </a>
+                                </button>
 
                                 <p className="text-slate-300 mb-4 flex-grow">{exercise.description}</p>
                                 

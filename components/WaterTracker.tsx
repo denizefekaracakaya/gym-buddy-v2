@@ -15,20 +15,21 @@ import {
 import { CameraIcon, BellIcon } from '../constants';
 import { estimateWaterVolumeFromImage, getErrorMessage } from '../services/geminiService';
 import Spinner from './shared/Spinner';
+import ImagePickerButton from './shared/ImagePickerButton';
+import { aiAvailable } from './shared/AiNotice';
+import { localDateKey, goalStreak } from '../lib/date';
+import {
+    hapticSuccess,
+    hapticTap,
+    isNative,
+    requestReminderPermission,
+    REMINDER_END_HOUR,
+    REMINDER_START_HOUR,
+    type PickedImage,
+} from '../services/native';
 
-// Helper to get date string in YYYY-MM-DD format
-const getISODateString = (date: Date): string => date.toISOString().split('T')[0];
-
-const toBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(',')[1]);
-        };
-        reader.onerror = error => reject(error);
-    });
+// Local calendar day (the original used UTC via toISOString()).
+const getISODateString = (date: Date): string => localDateKey(date);
 
 interface ConfettiParticle {
     id: number;
@@ -336,7 +337,8 @@ const MonthlyWaterChart: React.FC<{ log: Record<string, number>; goal: number }>
                         labelFormatter={(label) => `${label}`}
                     />
                     {goal > 0 && (
-                        <ReferenceLine 
+                        <ReferenceLine
+                            ifOverflow="extendDomain"
                             y={goal} 
                             stroke="#ef4444" 
                             strokeDasharray="3 3" 
@@ -365,62 +367,23 @@ const MonthlyWaterChart: React.FC<{ log: Record<string, number>; goal: number }>
 };
 
 
-// Helper to calculate consecutive days meeting the water intake goal
-const calculateStreak = (log: Record<string, number>, goal: number): number => {
-    if (goal <= 0) return 0;
-    
-    let streak = 0;
-    const checkDate = new Date();
-    
-    const todayStr = getISODateString(checkDate);
-    const todayIntake = log[todayStr] || 0;
-    const metToday = todayIntake >= goal;
-    
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = getISODateString(yesterday);
-    const metYesterday = (log[yesterdayStr] || 0) >= goal;
-    
-    // If goal is not met today AND yesterday, streak is broken (0)
-    if (!metToday && !metYesterday) {
-        return 0;
-    }
-    
-    const currentCheck = new Date();
-    // If met today, start counting back from today. If not met today but met yesterday, start back from yesterday.
-    if (!metToday) {
-        currentCheck.setDate(currentCheck.getDate() - 1);
-    }
-    
-    let iterations = 0;
-    // Safety guard to prevent any theoretical infinite loops while traversing back
-    while (iterations < 365) {
-        const dateStr = getISODateString(currentCheck);
-        const intake = log[dateStr] || 0;
-        if (intake >= goal) {
-            streak++;
-            currentCheck.setDate(currentCheck.getDate() - 1);
-        } else {
-            break;
-        }
-        iterations++;
-    }
-    
-    return streak;
-};
+const calculateStreak = (log: Record<string, number>, goal: number): number => goalStreak(log, goal);
 
 const WaterTracker: React.FC<{
     waterData: WaterData;
     setWaterData: React.Dispatch<React.SetStateAction<WaterData>>;
-}> = ({ waterData, setWaterData }) => {
+    /** Local YYYY-MM-DD; updated by App on resume / day change. */
+    todayKey: string;
+    isLoggedIn: boolean;
+    onLoginRedirect: () => void;
+}> = ({ waterData, setWaterData, todayKey, isLoggedIn, onLoginRedirect }) => {
     const [customAmount, setCustomAmount] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [analysisResult, setAnalysisResult] = useState<WaterEstimation | null>(null);
     const [analysisError, setAnalysisError] = useState<string | null>(null);
     const [showConfetti, setShowConfetti] = useState(false);
-    const cameraInputRef = useRef<HTMLInputElement>(null);
-
-    const todayString = useMemo(() => getISODateString(new Date()), []);
+    const [reminderMessage, setReminderMessage] = useState<string | null>(null);
+    const todayString = todayKey;
     const currentIntake = waterData.log[todayString] || 0;
     const dailyGoal = waterData.goal;
 
@@ -429,22 +392,21 @@ const WaterTracker: React.FC<{
     }, [waterData.log, dailyGoal]);
 
     const addWater = useCallback((amount: number) => {
-        if (isNaN(amount) || amount <= 0) return;
-        setWaterData(prev => {
-            const currentToday = prev.log[todayString] || 0;
-            const newIntake = currentToday + amount;
-            
-            // Check if we just crossed the hydration goal
-            if (currentToday < prev.goal && newIntake >= prev.goal && prev.goal > 0) {
-                setShowConfetti(true);
-            }
-            
-            return {
-                ...prev,
-                log: { ...prev.log, [todayString]: newIntake }
-            };
-        });
-    }, [todayString, setWaterData]);
+        if (isNaN(amount) || amount <= 0 || amount > 5000) return;
+        const currentToday = waterData.log[todayString] || 0;
+        const newIntake = currentToday + amount;
+        // Check if we just crossed the hydration goal
+        if (currentToday < waterData.goal && newIntake >= waterData.goal && waterData.goal > 0) {
+            setShowConfetti(true);
+            hapticSuccess();
+        } else {
+            hapticTap();
+        }
+        setWaterData(prev => ({
+            ...prev,
+            log: { ...prev.log, [todayString]: (prev.log[todayString] || 0) + amount }
+        }));
+    }, [todayString, setWaterData, waterData.log, waterData.goal]);
 
     const handleCustomAdd = (e: React.FormEvent) => {
         e.preventDefault();
@@ -464,49 +426,39 @@ const WaterTracker: React.FC<{
     
     const handleGoalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newGoal = parseInt(e.target.value, 10);
-        if (!isNaN(newGoal) && newGoal >= 0) {
+        if (!isNaN(newGoal) && newGoal >= 0 && newGoal <= 10000) {
              setWaterData(prev => ({ ...prev, goal: newGoal }));
         }
     }
     
     const handleReminderToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const isEnabled = e.target.checked;
-        
-        if (!isEnabled) {
-            // Turning off
-            setWaterData(prev => ({ ...prev, reminderEnabled: false }));
-            return;
-        }
+        setReminderMessage(null);
 
-        // Turning on
-        if (!("Notification" in window)) {
-            alert("Tarayıcınız bildirim özelliğini desteklemiyor.");
+        if (!isEnabled) {
+            setWaterData(prev => ({ ...prev, reminderEnabled: false }));
             return;
         }
 
         try {
-            // Proactively request permission regardless of current state
-            // If already granted, returns 'granted'
-            // If denied, returns 'denied'
-            // If default, prompts user
-            const permission = await Notification.requestPermission();
-            
+            // Asked only when the user turns reminders on (Android 13+ shows the system dialog).
+            const permission = await requestReminderPermission();
             if (permission === 'granted') {
                 setWaterData(prev => ({ ...prev, reminderEnabled: true }));
-                 try {
-                    new Notification("Gym Buddy", { body: "Bildirimler aktif! 💧" });
-                } catch(e) {
-                    // ignore potential error if notifications are blocked at system level despite browser permission
-                }
+                setReminderMessage('Hatırlatıcılar açıldı 💧');
+            } else if (permission === 'unsupported') {
+                setReminderMessage('Bu cihaz veya tarayıcı bildirimleri desteklemiyor.');
             } else {
-                // Denied or dismissed
                 setWaterData(prev => ({ ...prev, reminderEnabled: false }));
-                alert("Bildirim izni verilmedi. Lütfen tarayıcı ayarlarından (adres çubuğundaki kilit simgesi) bildirimlere izin verin.");
+                setReminderMessage(
+                    isNative
+                        ? 'Bildirim izni verilmedi. Ayarlar > Uygulamalar > Gym Buddy > Bildirimler bölümünden izin verebilirsiniz.'
+                        : 'Bildirim izni verilmedi. Lütfen tarayıcı ayarlarından bildirimlere izin verin.'
+                );
             }
         } catch (error) {
-            console.error("Notification permission error:", error);
             setWaterData(prev => ({ ...prev, reminderEnabled: false }));
-            alert("Bildirim izni istenirken bir hata oluştu.");
+            setReminderMessage('Bildirim izni istenirken bir hata oluştu.');
         }
     };
 
@@ -514,28 +466,20 @@ const WaterTracker: React.FC<{
         setWaterData(prev => ({ ...prev, reminderInterval: parseInt(e.target.value, 10) }));
     };
 
-    const handleImageCapture = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
+    const handleImagePicked = async (image: PickedImage) => {
         setIsAnalyzing(true);
         setAnalysisResult(null);
         setAnalysisError(null);
-
         try {
-            const base64Image = await toBase64(file);
-            const result = await estimateWaterVolumeFromImage(base64Image, file.type);
+            const result = await estimateWaterVolumeFromImage(image.base64, image.mimeType);
             setAnalysisResult(result);
         } catch (err: any) {
             setAnalysisError(getErrorMessage(err));
         } finally {
             setIsAnalyzing(false);
-            if (cameraInputRef.current) {
-                cameraInputRef.current.value = '';
-            }
         }
     };
-    
+
     const handleConfirmAnalysis = () => {
         if (analysisResult && analysisResult.estimatedVolume > 0) {
             addWater(Math.round(analysisResult.estimatedVolume));
@@ -581,6 +525,9 @@ const WaterTracker: React.FC<{
                         <input
                             id="daily-goal"
                             type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max="10000"
                             value={dailyGoal}
                             onChange={handleGoalChange}
                             className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:ring-1 focus:ring-blue-500 focus:outline-none"
@@ -637,11 +584,11 @@ const WaterTracker: React.FC<{
                 </div>
                 
                 <div className="mt-8 grid grid-cols-2 gap-4">
-                    <button onClick={() => addWater(200)} className="py-3 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors duration-200 font-semibold text-slate-200 shadow-md active:transform active:scale-95 flex flex-col items-center justify-center gap-1">
+                    <button onClick={() => addWater(200)} className="py-3 px-4 min-h-[56px] rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors duration-200 font-semibold text-slate-200 shadow-md active:transform active:scale-95 flex flex-col items-center justify-center gap-1">
                         <span>+200 ml</span>
                         <span className="text-xs text-slate-400 font-normal">Bardak</span>
                     </button>
-                    <button onClick={() => addWater(500)} className="py-3 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors duration-200 font-semibold text-slate-200 shadow-md active:transform active:scale-95 flex flex-col items-center justify-center gap-1">
+                    <button onClick={() => addWater(500)} className="py-3 px-4 min-h-[56px] rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors duration-200 font-semibold text-slate-200 shadow-md active:transform active:scale-95 flex flex-col items-center justify-center gap-1">
                         <span>+500 ml</span>
                         <span className="text-xs text-slate-400 font-normal">Şişe</span>
                     </button>
@@ -650,6 +597,9 @@ const WaterTracker: React.FC<{
                 <form onSubmit={handleCustomAdd} className="mt-4 flex gap-4">
                      <input
                         type="number"
+                        inputMode="numeric"
+                        min="1"
+                        max="5000"
                         value={customAmount}
                         onChange={(e) => setCustomAmount(e.target.value)}
                         placeholder="Özel miktar (ml)"
@@ -659,18 +609,11 @@ const WaterTracker: React.FC<{
                 </form>
                  
                  <div className="mt-8 pt-6 border-t border-slate-700/50">
-                    <input
-                        type="file"
-                        ref={cameraInputRef}
-                        onChange={handleImageCapture}
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                    />
-                    <button 
-                        onClick={() => cameraInputRef.current?.click()}
-                        disabled={isAnalyzing}
-                        className="w-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 shadow-lg shadow-indigo-900/30 group"
+                    <ImagePickerButton
+                        onPicked={handleImagePicked}
+                        onError={(msg) => setAnalysisError(msg)}
+                        disabled={isAnalyzing || !aiAvailable(isLoggedIn)}
+                        className="w-full bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 shadow-lg shadow-indigo-900/30 group"
                     >
                         <div className="p-2 bg-indigo-500 rounded-lg group-hover:bg-indigo-400 transition-colors">
                             <CameraIcon />
@@ -679,7 +622,14 @@ const WaterTracker: React.FC<{
                             <div className="text-sm font-medium opacity-90">AI Kamera ile</div>
                             <div className="text-lg leading-none">Suyu Ölç ve Ekle</div>
                         </div>
-                    </button>
+                    </ImagePickerButton>
+                    {!aiAvailable(isLoggedIn) && (
+                        <p className="text-xs text-slate-500 mt-2 text-center">
+                            {isLoggedIn ? 'Yapay zeka özellikleri bu sürümde kapalı.' : (
+                                <button onClick={onLoginRedirect} className="underline min-h-[44px]">AI kamera için giriş yapın</button>
+                            )}
+                        </p>
+                    )}
                 </div>
                 
                  <div className="mt-6 flex justify-center">
@@ -733,8 +683,11 @@ const WaterTracker: React.FC<{
                         </div>
                     )}
                 </div>
+                {reminderMessage && <p className="text-sm text-slate-300 mt-3 px-2" role="status">{reminderMessage}</p>}
                 <p className="text-xs text-slate-500 mt-2 px-2">
-                    * Bildirimler sadece tarayıcı sekmesi açıkken çalışır. Tarayıcı izni gereklidir.
+                    {isNative
+                        ? `* Hatırlatıcılar ${REMINDER_START_HOUR}:00–${REMINDER_END_HOUR}:00 arasında, uygulama kapalıyken de gönderilir.${isLoggedIn ? '' : ' Giriş yapmanız gerekir.'}`
+                        : '* Bildirimler sadece tarayıcı sekmesi açıkken çalışır. Tarayıcı izni gereklidir.'}
                 </p>
             </Card>
             
@@ -758,9 +711,9 @@ const WaterTracker: React.FC<{
                 <MonthlyWaterChart log={waterData.log} goal={dailyGoal} />
             </Card>
             
-            {/* Modal Logic Remains the Same */}
+            {/* Photo-analysis result dialog */}
             {(isAnalyzing || analysisResult || analysisError) && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={closeAnalysisModal} aria-modal="true" role="dialog">
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 pb-[calc(1rem+var(--safe-bottom))] animate-fade-in" onClick={closeAnalysisModal} aria-modal="true" role="dialog">
                     <Card className="w-full max-w-sm border border-slate-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                         {isAnalyzing && !analysisResult && (
                             <div className="text-center py-8">

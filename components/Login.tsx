@@ -1,12 +1,13 @@
-
 import React, { useState } from 'react';
 import Card from './shared/Card';
-import { 
-  auth, 
-  googleProvider, 
-  signInWithPopup, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword 
+import {
+    auth,
+    googleProvider,
+    googleSignInAvailable,
+    signInWithPopup,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
 } from '../services/firebase';
 
 interface LoginProps {
@@ -28,10 +29,39 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [info, setInfo] = useState('');
+
+    const handlePasswordReset = async () => {
+        setError('');
+        setInfo('');
+        if (!email.trim()) {
+            setError('Şifre sıfırlama bağlantısı için önce e-posta adresinizi girin.');
+            return;
+        }
+        setIsLoading(true);
+        try {
+            await sendPasswordResetEmail(auth, email.trim());
+        } catch (err: any) {
+            if (err?.code === 'auth/invalid-email') {
+                setError('Geçersiz bir e-posta adresi girdiniz.');
+                setIsLoading(false);
+                return;
+            }
+            if (err?.code === 'auth/network-request-failed') {
+                setError('İnternet bağlantısı yok. Lütfen tekrar deneyin.');
+                setIsLoading(false);
+                return;
+            }
+            // Other errors (e.g. unknown user) are not revealed, to avoid account enumeration.
+        }
+        setIsLoading(false);
+        setInfo('Bu adrese kayıtlı bir hesap varsa şifre sıfırlama bağlantısı gönderildi. Gelen kutunuzu (ve spam klasörünü) kontrol edin.');
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        setInfo('');
         setIsLoading(true);
 
         try {
@@ -52,7 +82,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 }
             }
         } catch (err: any) {
-            console.error("Auth error:", err);
+            console.warn('Auth error:', err?.code);
             let errMsg = 'Bir hata oluştu. Lütfen bilgilerinizi kontrol edip tekrar deneyin.';
             if (err.code === 'auth/email-already-in-use') {
                 errMsg = 'Bu e-posta adresi zaten kullanımda.';
@@ -62,6 +92,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 errMsg = 'Geçersiz e-posta veya şifre.';
             } else if (err.code === 'auth/invalid-email') {
                 errMsg = 'Geçersiz bir e-posta adresi girdiniz.';
+            } else if (err.code === 'auth/network-request-failed') {
+                errMsg = 'İnternet bağlantısı yok. Lütfen bağlantınızı kontrol edip tekrar deneyin.';
+            } else if (err.code === 'auth/operation-not-allowed') {
+                errMsg = 'E-posta ile giriş bu Firebase projesinde henüz etkin değil. Lütfen uygulama yöneticisiyle iletişime geçin.';
+            } else if (err.code === 'auth/too-many-requests') {
+                errMsg = 'Çok fazla deneme yapıldı. Lütfen bir süre sonra tekrar deneyin.';
             }
             setError(errMsg);
         } finally {
@@ -78,7 +114,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 onLoginSuccess(result.user.email || result.user.uid);
             }
         } catch (err: any) {
-            console.error("Google Sign-In Error:", err);
+            console.warn('Google Sign-In Error:', err?.code);
             if (err.code === 'auth/popup-blocked') {
                 setError('Google giriş penceresi engellendi. Lütfen tarayıcı ayarlarından pop-up engellemesini kaldırın veya e-posta ile giriş yapın.');
             } else if (err.code === 'auth/popup-closed-by-user') {
@@ -101,7 +137,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     {isLogin ? 'Devam etmek için hesabınıza giriş yapın.' : 'Başlamak için yeni bir hesap oluşturun.'}
                 </p>
 
-                {/* Google Sign-In Button */}
+                {/* Google Sign-In (browser only: popups are not available inside the Android app) */}
+                {googleSignInAvailable && (<>
                 <button
                     type="button"
                     onClick={handleGoogleSignIn}
@@ -134,6 +171,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     <span className="text-xs text-slate-500 font-medium">veya e-posta ile</span>
                     <div className="flex-1 h-[1px] bg-slate-800"></div>
                 </div>
+                </>)}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
@@ -178,19 +216,25 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                         </div>
                     )}
 
-                    {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+                    {error && <p className="text-red-400 text-sm text-center" role="alert">{error}</p>}
+                    {info && <p className="text-green-400 text-sm text-center" role="status">{info}</p>}
 
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300"
+                        className="w-full min-h-[48px] bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300"
                     >
                         {isLoading ? 'İşleniyor...' : (isLogin ? 'Giriş Yap' : 'Kayıt Ol')}
                     </button>
                 </form>
 
-                <div className="mt-6 text-center">
-                    <button onClick={() => { setMode(isLogin ? 'register' : 'login'); setError(''); }} className="text-sm text-blue-400 hover:underline">
+                <div className="mt-6 text-center space-y-2">
+                    {isLogin && (
+                        <button type="button" onClick={handlePasswordReset} disabled={isLoading} className="block mx-auto text-sm text-slate-400 hover:underline min-h-[44px]">
+                            Şifremi unuttum
+                        </button>
+                    )}
+                    <button onClick={() => { setMode(isLogin ? 'register' : 'login'); setError(''); setInfo(''); }} className="text-sm text-blue-400 hover:underline min-h-[44px]">
                         {isLogin ? 'Hesabınız yok mu? Kayıt Olun.' : 'Zaten bir hesabınız var mı? Giriş Yapın.'}
                     </button>
                 </div>

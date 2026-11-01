@@ -76,14 +76,14 @@ const Profile: React.FC<ProfileProps> = ({ userProfile, setUserProfile, savedWor
                     </div>
                      <button
                         onClick={onLogout}
-                        className="bg-slate-700 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-500 hover:text-white transition-colors duration-300 flex-shrink-0"
+                        className="bg-slate-700 text-white font-semibold py-2 px-4 min-h-[44px] rounded-lg hover:bg-red-500 hover:text-white transition-colors duration-300 flex-shrink-0"
                     >
                         Çıkış Yap
                     </button>
                 </div>
                 
                 <p className="text-slate-400 mb-6 border-t border-slate-800 pt-6">
-                    Kişisel bilgilerinizi girerek daha doğru tavsiyeler alın. Bu bilgiler cihazınızda saklanır.
+                    Kişisel bilgilerinizi girerek daha doğru tavsiyeler alın. Bu bilgiler hesabınızda saklanır ve cihazlarınız arasında senkronize edilir.
                 </p>
                 <form onSubmit={handleSaveProfile}>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -93,7 +93,7 @@ const Profile: React.FC<ProfileProps> = ({ userProfile, setUserProfile, savedWor
                         </div>
                         <div>
                             <Label htmlFor="age">Yaş</Label>
-                            <Input type="number" name="age" id="age" value={formData.age} onChange={handleChange} placeholder="Örn: 28" />
+                            <Input type="number" inputMode="decimal" step="any" name="age" id="age" value={formData.age} onChange={handleChange} placeholder="Örn: 28" />
                         </div>
                         <div>
                             <Label htmlFor="gender">Cinsiyet</Label>
@@ -105,31 +105,31 @@ const Profile: React.FC<ProfileProps> = ({ userProfile, setUserProfile, savedWor
                         </div>
                         <div>
                             <Label htmlFor="weight">Kilo (kg)</Label>
-                            <Input type="number" name="weight" id="weight" value={formData.weight} onChange={handleChange} placeholder="Örn: 75" />
+                            <Input type="number" inputMode="decimal" step="any" name="weight" id="weight" value={formData.weight} onChange={handleChange} placeholder="Örn: 75" />
                         </div>
                         <div>
                             <Label htmlFor="height">Boy (cm)</Label>
-                            <Input type="number" name="height" id="height" value={formData.height} onChange={handleChange} placeholder="Örn: 180"/>
+                            <Input type="number" inputMode="decimal" step="any" name="height" id="height" value={formData.height} onChange={handleChange} placeholder="Örn: 180"/>
                         </div>
                         <div>
                             <Label htmlFor="neck">Boyun Çevresi (cm)</Label>
-                            <Input type="number" name="neck" id="neck" value={formData.neck || ''} onChange={handleChange} placeholder="Örn: 38" />
+                            <Input type="number" inputMode="decimal" step="any" name="neck" id="neck" value={formData.neck || ''} onChange={handleChange} placeholder="Örn: 38" />
                         </div>
                         <div>
                             <Label htmlFor="waist">Bel Çevresi (cm)</Label>
-                            <Input type="number" name="waist" id="waist" value={formData.waist || ''} onChange={handleChange} placeholder="Örn: 85" />
+                            <Input type="number" inputMode="decimal" step="any" name="waist" id="waist" value={formData.waist || ''} onChange={handleChange} placeholder="Örn: 85" />
                         </div>
                         {formData.gender === 'female' && (
                              <div>
                                 <Label htmlFor="hip">Kalça Çevresi (cm)</Label>
-                                <Input type="number" name="hip" id="hip" value={formData.hip || ''} onChange={handleChange} placeholder="Örn: 95" />
+                                <Input type="number" inputMode="decimal" step="any" name="hip" id="hip" value={formData.hip || ''} onChange={handleChange} placeholder="Örn: 95" />
                             </div>
                         )}
                     </div>
                     <button
                         type="submit"
                         disabled={saveStatus !== 'idle'}
-                        className="mt-8 w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300"
+                        className="mt-8 w-full min-h-[48px] bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed transition-colors duration-300"
                     >
                         {saveStatus === 'saving' ? 'Kaydediliyor...' : saveStatus === 'saved' ? 'Bilgiler Kaydedildi ✔' : 'Bilgileri Kaydet'}
                     </button>
@@ -157,7 +157,7 @@ const Profile: React.FC<ProfileProps> = ({ userProfile, setUserProfile, savedWor
                                                     <div className="flex items-center gap-2">
                                                         <button 
                                                             onClick={(e) => { e.preventDefault(); handleDeleteWorkout(category, exercise.id); }}
-                                                            className="text-slate-500 hover:text-red-400 transition-colors duration-200 p-2 rounded-full -m-2 opacity-50 group-hover:opacity-100"
+                                                            className="text-slate-400 hover:text-red-400 transition-colors duration-200 p-3 rounded-full -m-2"
                                                             aria-label={`${exercise.name} egzersizini sil`}
                                                         >
                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
