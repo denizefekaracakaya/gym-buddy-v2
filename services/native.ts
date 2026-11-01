@@ -168,6 +168,9 @@ export async function scheduleWaterReminders(intervalMin: number): Promise<void>
             body: 'Hedefine ulaşmak için bir bardak su içmeyi unutma.',
             channelId: WATER_CHANNEL,
             schedule: { at, allowWhileIdle: true },
+            // Inexact alarms: no "Alarms & reminders" special permission screen
+            // (SCHEDULE_EXACT_ALARM is removed from the manifest on purpose).
+            isExactNotification: false,
             smallIcon: 'ic_stat_water',
         })),
     });

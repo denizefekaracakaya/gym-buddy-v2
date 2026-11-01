@@ -8,7 +8,8 @@ import { RateLimiter } from './rateLimit.ts';
 declare const Deno: { env: { get(name: string): string | undefined }; serve(h: (req: Request) => Promise<Response>): void };
 
 const env: Env = {
-    GEMINI_API_KEY: Deno.env.get('GEMINI_API_KEY') ?? '',
+    // trimmed: a pasted key with a trailing newline/space is rejected by Google with HTTP 400
+    GEMINI_API_KEY: (Deno.env.get('GEMINI_API_KEY') ?? '').trim(),
     SUPABASE_URL: Deno.env.get('SUPABASE_URL') ?? '',
     SUPABASE_ANON_KEY: Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     ALLOWED_ORIGINS: Deno.env.get('ALLOWED_ORIGINS'),

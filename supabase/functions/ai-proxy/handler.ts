@@ -72,7 +72,18 @@ async function callGemini(deps: Deps, env: Env, g: GeminiRequest) {
             signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
         },
     );
-    if (!res.ok) return { upstreamStatus: res.status as number };
+    if (!res.ok) {
+        // Only Google's machine-readable status/reason is kept (e.g. API_KEY_INVALID,
+        // NOT_FOUND) — never the request content.
+        let reason = '';
+        try {
+            const e = (await res.json()) as { error?: { status?: string; details?: { reason?: string }[] } };
+            reason = [e.error?.status, e.error?.details?.find((d) => d.reason)?.reason].filter(Boolean).join('/');
+        } catch {
+            // ignore
+        }
+        return { upstreamStatus: res.status as number, reason, model };
+    }
     const data = (await res.json()) as {
         candidates?: { content?: { parts?: { text?: string; inlineData?: { mimeType: string; data: string } }[] } }[];
     };
@@ -147,7 +158,14 @@ export async function handle(req: Request, env: Env, deps: Deps): Promise<Respon
     try {
         const reply = await callGemini(deps, env, geminiReq);
         if ('upstreamStatus' in reply) {
-            deps.log({ ...logBase, status: 'upstream_error', upstream: reply.upstreamStatus, ms: deps.now() - started });
+            deps.log({
+                ...logBase,
+                status: 'upstream_error',
+                upstream: reply.upstreamStatus,
+                reason: reply.reason,
+                model: reply.model,
+                ms: deps.now() - started,
+            });
             if (reply.upstreamStatus === 429) {
                 return err(429, 'ai_quota', 'Yapay zeka servisi şu an yoğun. Lütfen daha sonra tekrar deneyin.', cors);
             }
